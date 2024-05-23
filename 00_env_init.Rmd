@@ -1,0 +1,10 @@
+---
+title: "R Notebook"
+output: pdf
+---
+
+```{r}
+library(pacman)
+pacman::p_load(tidyverse)
+```
+

@@ -1,0 +1,120 @@
+---
+title: "R Notebook"
+output: pdf
+---
+
+#read environmental exposure data
+```{r}
+exp_dat<- read_csv("~/Documents/ECHO/ECHO_data/05_assays/Lab_Bio_Analysis_Results.csv") |>
+  mutate(analysis_analyte_name = str_to_lower(analysis_analyte_name))
+```
+
+#summary of exposure data
+```{r}
+summary_df <- exp_dat |>
+  group_by(analysis_analyte_name) |>
+  summarise(
+    total_obs = n(),
+    obs_with_LOD = paste(
+      sum(!is.na(analysis_llod)),
+      sprintf("(%.2f%%)", sum(!is.na(analysis_llod)) / total_obs * 100)
+    ),
+    obs_without_LOD = paste(
+      sum(is.na(analysis_llod)),
+      sprintf("(%.2f%%)", sum(is.na(analysis_llod)) / total_obs * 100)
+    ),
+    obs_bel_LOD = paste(
+      sum(!is.na(analysis_llod) & analysis_result <= analysis_llod, na.rm = TRUE),
+      sprintf("(%.2f%%)", sum(!is.na(analysis_llod) & analysis_result <= analysis_llod, na.rm = TRUE) / total_obs * 100)
+    ),
+    unique_llod_values = paste(
+      unique(paste0(sprintf("%.2f", analysis_llod[!is.na(analysis_llod)]), " ", analysis_result_unit[!is.na(analysis_llod)])),
+      collapse = ", "
+    ),
+    analyte_result_NA = paste(
+      sum(is.na(analysis_result)),
+      sprintf("(%.2f%%)", sum(is.na(analysis_result)) / total_obs * 100)
+    ),
+    min_value = ifelse(sum(!is.na(analysis_result[analysis_result > analysis_llod])) > 0, sprintf("%.2f", min(analysis_result[analysis_result > analysis_llod], na.rm = TRUE)), "NA"),
+    percentile_10 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.10, na.rm = TRUE)),
+    percentile_25 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.25, na.rm = TRUE)),
+    percentile_50 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.50, na.rm = TRUE)),
+    percentile_75 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.75, na.rm = TRUE)),
+    percentile_90 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.90, na.rm = TRUE)),
+    max_value = ifelse(sum(!is.na(analysis_result[analysis_result > analysis_llod])) > 0, sprintf("%.2f", max(analysis_result[analysis_result > analysis_llod], na.rm = TRUE)), "NA")
+  )
+
+write_csv(summary_df, "~/Documents/ECHO/ECHO_exposure_summary.csv")
+```
+
+#distribution plots - filtering data for 8 biomarkers
+```{r}
+exposure_subset <- exp_dat |>
+  filter(analysis_analyte_name %in% c("bis(1-chloro-2-propyl) phosphate",
+                                      "bis(2-chloroethyl) phosphate",
+                                      "bis(2-ethylhexyl) phoshate",
+                                      "bis(2-methylphenyl) phosphate",
+                                      "bis(butoxyethyl) pohosphate",
+                                      "bis(1,3-dichloro-2-propyl) phosphate"
+                                      )) |>
+  filter(!is.na(analysis_result)) |>
+  filter(!is.na(analysis_llod)) |>
+  select(c(10,13,16,17,19)) |>
+  mutate(log2_result = ifelse(analysis_result > analysis_llod, log2(analysis_result + 0.0000001), analysis_result))
+  #mutate(log2_result = log2(analysis_result + 1)) 
+
+#
+```
+
+#distribution plot
+```{r}
+exposure_subset |>
+  filter(analysis_result > analysis_llod) |>
+  ggplot(aes(x = log2_result)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 1, fill = "skyblue", color = "skyblue", alpha = 0.5) +
+  geom_density(color = "royalblue", linewidth=1) +
+  #geom_vline(xintercept = c(0.02856915), linetype = "dashed", color = "red") +
+  labs(x = "Analysis Result", y = "Density") +
+  ggtitle("Density Plot with Histogram of Biomarker Result") +
+  facet_wrap(~ analysis_analyte_name, scales = "free") +
+  theme_minimal()
+```
+
+```{r}
+# Define x-axis intercepts for each facet panel
+x_intercepts <- data.frame(
+  analysis_analyte_name = c("bis(1-chloro-2-propyl) phosphate",
+                                      "bis(2-chloroethyl) phosphate",
+                                      "bis(2-ethylhexyl) phoshate",
+                                      "bis(2-methylphenyl) phosphate",
+                                      "bis(butoxyethyl) pohosphate",
+                                      "bis(1,3-dichloro-2-propyl) phosphate"),
+  x_intercept = c(-5.61528, -5.643849, -5.878313, -6.44221, -5.651081, -5.844761)
+)
+
+# Plotting the density plot with histogram faceted by analysis_analyte_name
+p <- exposure_subset |>
+  filter(analysis_result > analysis_llod) |>
+  ggplot(aes(x = log2_result)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 0.1, fill = "skyblue", color = "skyblue", alpha = 0.5) +
+  geom_density(color = "royalblue", linewidth=1) +
+  labs(x = "Biomarker concentration on log2 scale", y = "Density",
+       caption = "Below LOD summary: Each panel for a biomarker includes 4145 observations. Since the biomarker result values were log2 transformed, the LOD threshold was visualized \nat log2 scale (red-dotted line in each panel)\nbis(1-chloro-2-propyl) phosphate: 1887 (44.68%); bis(2-chloroethyl) phosphate: 1329 (31.47%); \nbis(2-ethylhexyl) phoshate: 3015 (72.70%); bis(2-methylphenyl) phosphate: 2646 (63.81%); \nbis(butoxyethyl) pohosphate: 1394 (33.61%); bis(1,3-dichloro-2-propyl) phosphate: 518 (12.49%)") +
+  ggtitle("") +
+  facet_wrap(~ analysis_analyte_name, scales = "free") +
+  theme_minimal()+
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.caption = element_text(hjust = 0)  # Left-align the caption
+  )
+
+# Add vertical lines for each facet panel
+p + geom_vline(data = x_intercepts, aes(xintercept = x_intercept), linetype = "dashed", color = "red", linewidth = 0.7, alpha = 0.8)
+
+ggsave("~/Documents/ECHO/exposure_viz.tiff",
+       width=10, height= 8, dpi=300)
+```
+
+
+
