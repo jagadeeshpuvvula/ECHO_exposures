@@ -1,0 +1,191 @@
+---
+title: "9999_functions"
+author: "Puvvula"
+date: "2024-09-07"
+output: pdf_document
+---
+
+```{r}
+generate_tables <- function(df, variables, category) {
+  results <- lapply(variables, function(var) {
+    if (is.factor(df[[var]]) || is.character(df[[var]])) {
+      # Handle categorical variables
+      tab <- table(df[[var]], df[[category]], useNA = "ifany")
+      
+      # Calculate row and column percentages
+      row_perc <- prop.table(tab, 1) * 100
+      col_perc <- prop.table(tab, 2) * 100
+      
+      # Initialize an empty matrix for formatted values
+      formatted_tab <- matrix(nrow = nrow(tab), ncol = ncol(tab))
+      
+      # Populate the formatted values
+      for (i in 1:nrow(tab)) {
+        for (j in 1:ncol(tab)) {
+          count <- tab[i, j]
+          row_pct <- row_perc[i, j]
+          col_pct <- col_perc[i, j]
+          formatted_tab[i, j] <- sprintf("%d (%0.1f%%, %0.1f%%)", count, row_pct, col_pct)
+        }
+      }
+      
+      # Convert matrix to data frame with proper row and column names
+      formatted_tab_df <- as.data.frame(formatted_tab)
+      rownames(formatted_tab_df) <- rownames(tab)
+      colnames(formatted_tab_df) <- colnames(tab)
+      
+      # Perform Chi-square test
+      chi_sq_test <- chisq.test(tab)
+      chi_sq_stat <- chi_sq_test$statistic
+      chi_sq_p_value <- chi_sq_test$p.value
+      
+      # Perform Fisher's Exact Test
+      fisher_test <- fisher.test(tab)
+      fisher_p_value <- fisher_test$p.value
+      
+      # Format the Chi-square results into a single line
+      chi_sq_results <- sprintf("Chi-square statistic: %0.6f (p-value: %0.8f)", chi_sq_stat, chi_sq_p_value)
+      
+      # Format the Fisher's Exact Test results into a single line
+      fisher_results <- sprintf("Fisher's Exact Test p-value: %0.8f", fisher_p_value)
+      
+      # Return a list containing the formatted table and test results
+      list(
+        Table = formatted_tab_df,
+        Chi_square_results = chi_sq_results,
+        Fisher_results = fisher_results
+      )
+      
+    } else if (is.numeric(df[[var]])) {
+      # Handle continuous variables
+      means_by_category <- aggregate(df[[var]] ~ df[[category]], FUN = mean)
+      colnames(means_by_category) <- c(category, "Mean")
+      
+      # Perform t-test
+      categories <- unique(df[[category]])
+      if (length(categories) == 2) {
+        group1 <- df[df[[category]] == categories[1], var]
+        group2 <- df[df[[category]] == categories[2], var]
+        t_test <- t.test(group1, group2)
+        
+        t_stat <- t_test$statistic
+        t_p_value <- t_test$p.value
+        
+        # Format the t-test results into a single line
+        t_test_results <- sprintf("t-test statistic: %0.6f (p-value: %0.8f)", t_stat, t_p_value)
+      } else {
+        t_test_results <- "t-test not applicable (more than two categories)"
+      }
+      
+      # Return a list containing the means and t-test results
+      list(
+        Means_by_Category = means_by_category,
+        T_test_results = t_test_results
+      )
+    } else {
+      # Handle other variable types (if needed)
+      list(Message = "Variable type not supported")
+    }
+  })
+  
+  names(results) <- variables
+  return(results)
+}
+
+```
+
+```{r}
+analyte_summary <- function(data, analyte_col, category_col, result_col) {
+  
+  # Ensure columns are properly referenced
+  analyte_col <- as.character(substitute(analyte_col))
+  category_col <- as.character(substitute(category_col))
+  result_col <- as.character(substitute(result_col))
+  
+  # Initialize an empty list to store results
+  results_list <- list()
+  
+  # Get unique analyte levels
+  analyte_levels <- unique(data[[analyte_col]])
+  
+  # Iterate over each analyte level
+  for (analyte_level in analyte_levels) {
+    # Subset data for the current analyte level
+    subset_data <- subset(data, data[[analyte_col]] == analyte_level)
+    
+    # Get unique categories
+    categories <- unique(subset_data[[category_col]])
+    
+    # Initialize a dataframe to store means and t-test results
+    analyte_results <- data.frame()
+    
+    # Check if there are exactly two categories for t-test
+    if (length(categories) == 2) {
+      # Calculate means by category
+      means <- tapply(subset_data[[result_col]], subset_data[[category_col]], mean)
+      
+      # Perform t-test
+      t_test_result <- t.test(subset_data[[result_col]] ~ subset_data[[category_col]])
+      
+      # Format the t-test result as a string
+      t_test_summary <- sprintf("%.2f (p = %.4f)", t_test_result$statistic, t_test_result$p.value)
+      
+      # Combine results into a dataframe
+      analyte_results <- data.frame(
+        category = categories,
+        mean_result = means,
+        t_test_summary = t_test_summary
+      )
+    } else {
+      # Handle cases with more than two categories or insufficient data for t-test
+      analyte_results <- data.frame(
+        category = categories,
+        mean_result = tapply(subset_data[[result_col]], subset_data[[category_col]], mean),
+        t_test_summary = NA
+      )
+    }
+    
+    # Add a column for analyte level
+    analyte_results$analyte <- analyte_level
+    
+    # Append results to the list
+    results_list[[as.character(analyte_level)]] <- analyte_results
+  }
+  
+  # Return the list of results
+  return(results_list)
+}
+```
+
+```{r}
+#function to filter observations
+filter_analyte <- function(data, analyte_name, lod_minus, lod_plus, lod_value, label_type) {
+  # Step 1: Filter the dataframe for the specified analyte and condition
+  filtered_data <- data |>
+    mutate(result_res = log2(result_res)) |>
+    filter(analyte == analyte_name,
+           result_res >= lod_minus &  # LOD - SD
+             result_res <= lod_plus) |>  # LOD + SD
+    mutate(category = case_when(
+      result_res >= lod_minus &  # LOD - SD
+        result_res < lod_value ~ paste0(label_type, "_sd_bel_lod"),  # LOD value
+      result_res >= lod_value &  # LOD value
+        result_res <= lod_plus ~ paste0(label_type, "_sd_abv_lod"),  # LOD + SD
+      TRUE ~ NA_character_  # Assign NA to values outside the specified ranges
+    ))
+  
+  # Step 2: Extract unique subject_id values and add category information
+  filtered_subjects <- filtered_data |>
+    select(subject_id, category) |>  # Include category in the selection
+    distinct()  # Ensure unique subject_id and category combinations
+  
+  # Step 3: Pull all observations with matching subject_id values
+  result <- data |>
+    filter(subject_id %in% filtered_subjects$subject_id)
+  
+  # Step 4: Join with the filtered_subjects to include category information
+  result |>
+    left_join(filtered_subjects, by = "subject_id")  # Add category information to the result
+}
+```
+

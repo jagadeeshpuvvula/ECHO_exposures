@@ -1,0 +1,16 @@
+---
+title: '03_demog'
+author: "Puvvula"
+date: "2024-08-20"
+output: html_document
+---
+
+```{r}
+folder_path <- "~/Documents/ECHO/ECHO_data/demog"
+
+csv_files <- list.files(path = folder_path, pattern = "*.csv", full.names = TRUE)
+list_of_datasets <- map(csv_files, read_csv)
+
+demog_df <- reduce(list_of_datasets, full_join, by = "xParticipantID") |>
+  clean_names()
+ ```

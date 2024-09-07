@@ -1,0 +1,76 @@
+---
+title: "999_scratch"
+author: "Puvvula"
+date: "2024-05-29"
+output: pdf_document
+---
+
+#summary of exposure data
+```{r}
+summary_df <- exp_dat |>
+  group_by(analysis_analyte_name) |>
+  summarise(
+    total_obs = n(),
+    obs_with_LOD = paste(
+      sum(!is.na(analysis_llod)),
+      sprintf("(%.2f%%)", sum(!is.na(analysis_llod)) / total_obs * 100)
+    ),
+    count_without_LOD = sum(is.na(analysis_llod)),
+    pct_without_LOD = sprintf("(%.2f%%)", sum(is.na(analysis_llod)) / total_obs * 100),
+    
+    obs_bel_LOD = paste(
+      sum(!is.na(analysis_llod) & analysis_result <= analysis_llod, na.rm = TRUE),
+      sprintf("(%.2f%%)", sum(!is.na(analysis_llod) & analysis_result <= analysis_llod, na.rm = TRUE) / total_obs * 100)
+    ),
+    unique_llod_values = paste(
+      unique(paste0(sprintf("%.2f", analysis_llod[!is.na(analysis_llod)]), " ", analysis_result_unit[!is.na(analysis_llod)])),
+      collapse = ", "
+    ),
+    analyte_result_NA = paste(
+      sum(is.na(analysis_result)),
+      sprintf("(%.2f%%)", sum(is.na(analysis_result)) / total_obs * 100)
+    ),
+    min_value = ifelse(sum(!is.na(analysis_result[analysis_result > analysis_llod])) > 0, sprintf("%.2f", min(analysis_result[analysis_result > analysis_llod], na.rm = TRUE)), "NA"),
+    percentile_10 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.10, na.rm = TRUE)),
+    percentile_25 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.25, na.rm = TRUE)),
+    percentile_50 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.50, na.rm = TRUE)),
+    percentile_75 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.75, na.rm = TRUE)),
+    percentile_90 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.90, na.rm = TRUE)),
+    max_value = ifelse(sum(!is.na(analysis_result[analysis_result > analysis_llod])) > 0, sprintf("%.2f", max(analysis_result[analysis_result > analysis_llod], na.rm = TRUE)), "NA")
+  )
+
+write_csv(summary_df, "~/Documents/ECHO/ECHO_exposure_summary.csv")
+```
+
+#new summary format
+```{r}
+summary_df <- exp_dat |>
+  group_by(analysis_analyte_name) |>
+  summarise(
+    total_obs = n(),
+    obs_with_LOD_count = sum(!is.na(analysis_llod)),
+    obs_with_LOD_percentage = sprintf("%.2f%%", obs_with_LOD_count / total_obs * 100),
+    obs_without_LOD_count = sum(is.na(analysis_llod)),
+    obs_without_LOD_percentage = sprintf("%.2f%%", obs_without_LOD_count / total_obs * 100),
+    obs_bel_LOD_count = sum(!is.na(analysis_llod) & analysis_result <= analysis_llod, na.rm = TRUE),
+    obs_bel_LOD_percentage = sprintf("%.2f%%", obs_bel_LOD_count / total_obs * 100),
+    analyte_result_NA_count = sum(is.na(analysis_result)),
+    analyte_result_NA_percentage = sprintf("%.2f%%", analyte_result_NA_count / total_obs * 100),
+    unique_llod_values = paste(
+      unique(paste0(sprintf("%.2f", analysis_llod[!is.na(analysis_llod)]), " ", analysis_result_unit[!is.na(analysis_llod)])),
+      collapse = ", "
+    ),
+    log_sd = sprintf("%.2f", 0.5*(sd(analysis_result[analysis_result > analysis_llod], na.rm = TRUE))),
+    log_half_sd = sprintf("%.2f", 0.5*(sd(analysis_result[analysis_result > analysis_llod], na.rm = TRUE))),
+    log_quat_sd = sprintf("%.2f", 0.25*(sd(analysis_result[analysis_result > analysis_llod], na.rm = TRUE))),
+    min_value = ifelse(sum(!is.na(analysis_result[analysis_result > analysis_llod])) > 0, sprintf("%.2f", min(analysis_result[analysis_result > analysis_llod], na.rm = TRUE)), "NA"),
+    percentile_10 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.10, na.rm = TRUE)),
+    percentile_25 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.25, na.rm = TRUE)),
+    percentile_50 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.50, na.rm = TRUE)),
+    percentile_75 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.75, na.rm = TRUE)),
+    percentile_90 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.90, na.rm = TRUE)),
+    max_value = ifelse(sum(!is.na(analysis_result[analysis_result > analysis_llod])) > 0, sprintf("%.2f", max(analysis_result[analysis_result > analysis_llod], na.rm = TRUE)), "NA")
+  )
+
+write_csv(summary_df, "~/Documents/ECHO/ECHO_exposure_summary.csv")
+```

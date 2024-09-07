@@ -14,91 +14,88 @@ exp_dat<- read_csv("~/Documents/ECHO/ECHO_data/05_assays/Lab_Bio_Analysis_Result
                                             "bis(1,3-dichloro-2-propyl) phosphate" = "bis(1,3-dichloro-2propyl) phosphate",
                                             "bis(1-chloro-2-propyl) phosphate" = "bis-(1-chloro-2propl) phosphate",
                                             "bis(2-chloroethyl) phosphate" = "bis-2chloroethyl phosphate")) 
-
-|>
-  filter(grepl("phosphate", analysis_analyte_name, ignore.case = TRUE))
-  
 ```
 
-#summary of exposure data
+
+#summarizing using filtered data
 ```{r}
-summary_df <- exp_dat |>
-  group_by(analysis_analyte_name) |>
+exp_dat<- exp_dat_df |>
+  filter(specimen_collection_trimester == 2)
+```
+
+
+#May 29
+########
+#######
+#####
+```{r}
+# Step 1: Calculate summary statistics
+summary_stats <- exp_dat %>%
+  mutate(analysis_result = if_else(analysis_result < analysis_llod, analysis_llod / sqrt(2), analysis_result)) %>%
+  group_by(analysis_analyte_name, analysis_llod) %>%
   summarise(
-    total_obs = n(),
-    obs_with_LOD = paste(
-      sum(!is.na(analysis_llod)),
-      sprintf("(%.2f%%)", sum(!is.na(analysis_llod)) / total_obs * 100)
-    ),
-    count_without_LOD = sum(is.na(analysis_llod)),
-    pct_without_LOD = sprintf("(%.2f%%)", sum(is.na(analysis_llod)) / total_obs * 100),
-    
-    obs_bel_LOD = paste(
-      sum(!is.na(analysis_llod) & analysis_result <= analysis_llod, na.rm = TRUE),
-      sprintf("(%.2f%%)", sum(!is.na(analysis_llod) & analysis_result <= analysis_llod, na.rm = TRUE) / total_obs * 100)
-    ),
-    unique_llod_values = paste(
-      unique(paste0(sprintf("%.2f", analysis_llod[!is.na(analysis_llod)]), " ", analysis_result_unit[!is.na(analysis_llod)])),
-      collapse = ", "
-    ),
-    analyte_result_NA = paste(
-      sum(is.na(analysis_result)),
-      sprintf("(%.2f%%)", sum(is.na(analysis_result)) / total_obs * 100)
-    ),
-    min_value = ifelse(sum(!is.na(analysis_result[analysis_result > analysis_llod])) > 0, sprintf("%.2f", min(analysis_result[analysis_result > analysis_llod], na.rm = TRUE)), "NA"),
-    percentile_10 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.10, na.rm = TRUE)),
-    percentile_25 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.25, na.rm = TRUE)),
-    percentile_50 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.50, na.rm = TRUE)),
-    percentile_75 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.75, na.rm = TRUE)),
-    percentile_90 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.90, na.rm = TRUE)),
-    max_value = ifelse(sum(!is.na(analysis_result[analysis_result > analysis_llod])) > 0, sprintf("%.2f", max(analysis_result[analysis_result > analysis_llod], na.rm = TRUE)), "NA")
+    log_lod_num = log2(first(analysis_llod)),  # Calculate log_lod as numeric
+    std_dev_result_num = sd(log2(analysis_result), na.rm = TRUE), # Calculate std_dev_result as numeric
+    half_std_dev_result = (sd(log2(analysis_result), na.rm = TRUE))/2,
+    quart_std_dev_result = (sd(log2(analysis_result), na.rm = TRUE))/4,
+    .groups = 'drop'  # Ungroup after summarising
+  ) %>%
+  mutate(
+    lod_plus_sd_num = log_lod_num + std_dev_result_num,  # Calculate lod_plus_sd as numeric
+    lod_minus_sd_num = log_lod_num - std_dev_result_num,  # Calculate lod_plus_sd as numeric
+    lod_plus_half_sd = log_lod_num + half_std_dev_result,  
+    lod_minus_half_sd = log_lod_num - half_std_dev_result, 
+    lod_plus_quart_sd = log_lod_num + quart_std_dev_result,  
+    lod_minus_quart_sd = log_lod_num - quart_std_dev_result
   )
 
-write_csv(summary_df, "~/Documents/ECHO/ECHO_exposure_summary.csv")
-```
-
-#new summary format
-```{r}
-summary_df <- exp_dat |>
-  group_by(analysis_analyte_name) |>
+# Step 2: Count observations within the specified range
+count_within_range <- exp_dat %>%
+  mutate(analysis_result = if_else(analysis_result < analysis_llod, analysis_llod / sqrt(2), analysis_result)) %>%
+  left_join(summary_stats, by = c("analysis_analyte_name", "analysis_llod")) %>%
+  group_by(analysis_analyte_name, analysis_llod) %>%
   summarise(
+    count_lod_plus_sd = sum(log2(analysis_result) > log2(analysis_llod) & log2(analysis_result) < lod_plus_sd_num, na.rm = TRUE),
+    count_lod_minus_sd = sum(log2(analysis_result) < log2(analysis_llod) & log2(analysis_result) > lod_minus_sd_num, na.rm = TRUE),
+  
+    count_lod_plus_half_sd = sum(log2(analysis_result) > log2(analysis_llod) & log2(analysis_result) < lod_plus_half_sd, na.rm = TRUE),
+    count_lod_minus_half_sd = sum(log2(analysis_result) < log2(analysis_llod) & log2(analysis_result) > lod_minus_half_sd, na.rm = TRUE),
+    
+    count_lod_plus_quart_sd = sum(log2(analysis_result) > log2(analysis_llod) & log2(analysis_result) < lod_plus_quart_sd, na.rm = TRUE),
+    count_lod_minus_quart_sd = sum(log2(analysis_result) < log2(analysis_llod) & log2(analysis_result) > lod_minus_quart_sd, na.rm = TRUE),
+    
     total_obs = n(),
     obs_with_LOD_count = sum(!is.na(analysis_llod)),
     obs_with_LOD_percentage = sprintf("%.2f%%", obs_with_LOD_count / total_obs * 100),
-    obs_without_LOD_count = sum(is.na(analysis_llod)),
-    obs_without_LOD_percentage = sprintf("%.2f%%", obs_without_LOD_count / total_obs * 100),
     obs_bel_LOD_count = sum(!is.na(analysis_llod) & analysis_result <= analysis_llod, na.rm = TRUE),
     obs_bel_LOD_percentage = sprintf("%.2f%%", obs_bel_LOD_count / total_obs * 100),
     analyte_result_NA_count = sum(is.na(analysis_result)),
     analyte_result_NA_percentage = sprintf("%.2f%%", analyte_result_NA_count / total_obs * 100),
-    unique_llod_values = paste(
-      unique(paste0(sprintf("%.2f", analysis_llod[!is.na(analysis_llod)]), " ", analysis_result_unit[!is.na(analysis_llod)])),
-      collapse = ", "
-    ),
-    log_sd = sprintf("%.2f", 0.5*(sd(analysis_result[analysis_result > analysis_llod], na.rm = TRUE))),
-    log_half_sd = sprintf("%.2f", 0.5*(sd(analysis_result[analysis_result > analysis_llod], na.rm = TRUE))),
-    log_quat_sd = sprintf("%.2f", 0.25*(sd(analysis_result[analysis_result > analysis_llod], na.rm = TRUE))),
-    min_value = ifelse(sum(!is.na(analysis_result[analysis_result > analysis_llod])) > 0, sprintf("%.2f", min(analysis_result[analysis_result > analysis_llod], na.rm = TRUE)), "NA"),
-    percentile_10 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.10, na.rm = TRUE)),
-    percentile_25 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.25, na.rm = TRUE)),
-    percentile_50 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.50, na.rm = TRUE)),
-    percentile_75 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.75, na.rm = TRUE)),
-    percentile_90 = sprintf("%.2f", quantile(analysis_result[analysis_result > analysis_llod], 0.90, na.rm = TRUE)),
-    max_value = ifelse(sum(!is.na(analysis_result[analysis_result > analysis_llod])) > 0, sprintf("%.2f", max(analysis_result[analysis_result > analysis_llod], na.rm = TRUE)), "NA")
+    min_value = ifelse(sum(!is.na(analysis_result)) > 0, sprintf("%.2f", min(analysis_result, na.rm = TRUE)), "NA"),
+    percentile_10 = sprintf("%.2f", quantile(analysis_result, 0.10, na.rm = TRUE)),
+    percentile_25 = sprintf("%.2f", quantile(analysis_result, 0.25, na.rm = TRUE)),
+    percentile_50 = sprintf("%.2f", quantile(analysis_result, 0.50, na.rm = TRUE)),
+    percentile_75 = sprintf("%.2f", quantile(analysis_result, 0.75, na.rm = TRUE)),
+    percentile_90 = sprintf("%.2f", quantile(analysis_result, 0.90, na.rm = TRUE)),
+    max_value = ifelse(sum(!is.na(analysis_result)) > 0, sprintf("%.2f", max(analysis_result, na.rm = TRUE)), "NA"),
+    .groups = 'drop'
   )
 
-write_csv(summary_df, "~/Documents/ECHO/ECHO_exposure_summary.csv")
+# Step 3: Merge results and format output
+sd_threshold <- summary_stats |>
+  left_join(count_within_range, by = c("analysis_analyte_name", "analysis_llod"))  |>
+  filter(!is.na(analysis_llod))|>
+  mutate(across(2:6, ~ sprintf("%.2f", .)))
+
+write_csv(sd_threshold, "~/Documents/ECHO/ECHO_exposure_summary_july09.csv")
 ```
+
+
 
 #new summary format suggested by Aimin
 #single imputation using LOD/sqrt-2
 #using chemical biomarkers that has a single value as LOD
 ```{r}
-threshold_df <- exp_dat |>
-  mutate(analysis_result = if_else(analysis_result < analysis_llod, analysis_llod / sqrt(2), analysis_result)) |>
-  group_by(analysis_analyte_name, analysis_llod) 
-
-
 summary_df <- exp_dat |>
   mutate(analysis_result = if_else(analysis_result < analysis_llod, analysis_llod / sqrt(2), analysis_result)) |>
   group_by(analysis_analyte_name) |>
@@ -146,8 +143,21 @@ exposure_subset <- exp_dat |>
   #mutate(log2_result = log2(analysis_result + 0.000001)) 
 ```
 
-#left-truncated imputation
+#left-truncated imputation - August 6
 ```{r}
+set.seed(2024)
+
+exposure_subset<- exp_dat |>
+  select(c(1,2,4,5,6,7,8,9)) |>
+  #filter(analysis_analyte_name == "bis(1-chloro-2-propyl) phosphate") |>
+  mutate(analysis_result = if_else(
+    analysis_result < analysis_llod,
+    runif(n(), min = 1e-4, max = analysis_llod),
+    analysis_result
+  ),
+  analysis_result = as.numeric(sprintf("%.4f", analysis_result))) |>
+  rename(subject.id = x_participant_id)
+
 labres<- exposure_subset |>
   mutate(lod.flag = if_else(analysis_result < analysis_llod, 1, 0),
          test.result = analysis_result,
@@ -160,67 +170,111 @@ LODmeansd.all <- labres %>%
   summarise(meanlog2 = mean(log2.test.result, na.rm= TRUE), sdlog2 = sd(log2.test.result, na.rm=TRUE)) %>% 
   mutate(test.name = (paste0(test.name, ".t", test.time)))
 
-dat_bbep <- labres |> 
-  filter(test.name == "bis(butoxyethyl) phosphate")
+#repeat below process for each analyte
 
-dat_behp <- labres |> 
-  filter(test.name == "bis(2-ethylhexyl) phosphate")
+#BCPP
+dat_bcpp <- labres |> filter(test.name == "bis(1-chloro-2-propyl) phosphate")
+dat_imp_bcpp <- impute(dat_bcpp, LODmeansd.all, "bis(1-chloro-2-propyl) phosphate.tone", "result")
 
-set.seed(1010)
-dat_imp_bbep <- impute(dat_bbep, LODmeansd.all, "bis(butoxyethyl) phosphate.tone", "result")
+#BCEP
+dat_bcep <- labres |> filter(test.name == "bis(2-chloroethyl) phosphate")
+dat_imp_bcep <- impute(dat_bcep, LODmeansd.all, "bis(2-chloroethyl) phosphate.tone", "result")
+
+#BDCPP
+dat_bdcpp <- labres |> filter(test.name == "bis(1,3-dichloro-2-propyl) phosphate")
+dat_imp_bdcpp <- impute(dat_bdcpp, LODmeansd.all, "bis(1,3-dichloro-2-propyl) phosphate.tone", "result")
+
+#BEHP
+dat_behp <- labres |> filter(test.name == "bis(2-ethylhexyl) phosphate")
 dat_imp_behp <- impute(dat_behp, LODmeansd.all, "bis(2-ethylhexyl) phosphate.tone", "result")
+
+#BMPP
+dat_bmpp <- labres |> filter(test.name == "bis(2-methylphenyl) phosphate")
+dat_imp_bmpp <- impute(dat_bmpp, LODmeansd.all, "bis(2-methylphenyl) phosphate.tone", "result")
+
+#BBEP
+dat_bbep <- labres |> filter(test.name == "bis(butoxyethyl) phosphate")
+dat_imp_bbep <- impute(dat_bbep, LODmeansd.all, "bis(butoxyethyl) phosphate.tone", "result")
+
+#DEP
+dat_dep <- labres |> filter(test.name == "diethylphosphate")
+dat_imp_dep <- impute(dat_dep, LODmeansd.all, "diethylphosphate.tone", "result")
+
+#DPP
+dat_dpp <- labres |> filter(test.name == "dipropyl phosphate")
+dat_imp_dpp <- impute(dat_dpp, LODmeansd.all, "dipropyl phosphate.tone", "result")
 ```
 
 #join imputed datasets
 ```{r}
+dat_imp_bcpp <- dat_imp_bcpp |> mutate(analyte = "bis(1-chloro-2-propyl) phosphate")
+dat_imp_bcep <- dat_imp_bcep |> mutate(analyte = "bis(2-chloroethyl) phosphate")
+dat_imp_bdcpp <- dat_imp_bdcpp |> mutate(analyte = "bis(1,3-dichloro-2-propyl) phosphate")
 dat_imp_behp <- dat_imp_behp |> mutate(analyte = "bis(2-ethylhexyl) phosphate")
+dat_imp_bmpp <- dat_imp_bmpp |> mutate(analyte = "bis(2-methylphenyl) phosphate")
 dat_imp_bbep <- dat_imp_bbep |> mutate(analyte = "bis(butoxyethyl) phosphate")
+dat_imp_dep <- dat_imp_dep |> mutate(analyte = "diethylphosphate")
+dat_imp_dpp <- dat_imp_dpp |> mutate(analyte = "dipropyl phosphate")
 
-imputed_dat<- bind_rows(dat_imp_behp, dat_imp_bbep)
-write_csv(imputed_dat, "~/Documents/ECHO/imputed_left_trunc.csv")
+imputed_dat<- bind_rows(dat_imp_bcpp, dat_imp_bcep, dat_imp_bdcpp,
+                        dat_imp_behp, dat_imp_bmpp, dat_imp_bbep,
+                        dat_imp_dep, dat_imp_dpp)
+write_csv(imputed_dat, "~/Documents/ECHO/imputed_left_trunc_aug06.csv")
 ```
 
 #prep for viz
 ```{r}
+imputed_dat<- read_csv("~/Documents/ECHO/imputed_left_trunc_aug06.csv")
+
 viz_dat<- imputed_dat |>
-  mutate(log2_result= log2(result.flag))
+  mutate(log2_result= log2(result.res)) |>
+  filter(analyte == "bis(1,3-dichloro-2-propyl) phosphate")
+
+
+line_data <- tibble(
+  xintercept = c(-4.069298652,	-7.218413728,	-4.856577421,	-6.431134959,	-5.250216805,	-6.037495574,	-5.6439),
+  color = c("black", "black", "red", "red", "purple", "purple", "orange"),
+  linetype = c("dashed", "dashed", "dashed", "dashed", "dashed", "dashed", "solid")  # Added linetype column
+)
 
 # Plotting the density plot with histogram faceted by analysis_analyte_name
 viz_dat |>
   ggplot(aes(x = log2_result)) +
-  geom_histogram(aes(y = after_stat(density)), binwidth = 1, fill = "skyblue", color = "skyblue", alpha = 0.5) +
-  geom_density(color = "royalblue", linewidth=0.5) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 0.25, fill = "skyblue", color = "skyblue", alpha = 0.5) +
+  geom_density(color = "royalblue", linewidth=0.9) +
   labs(x = "Biomarker concentration on log2 scale", y = "Density",
        caption = " ") +
   ggtitle("") +
-  #scale_y_continuous(trans = "exp")+
-  #annotation_logticks(sides="lr")+
-  scale_x_continuous(breaks = seq(-12, 5, by = 2), labels = seq(-12, 5, by = 2))+
-  facet_wrap(~ analyte) +
-  theme_minimal()+
+  scale_x_continuous(breaks = seq(-16, 6, by = 2), labels = seq(-16, 6, by = 2)) +
+  theme_minimal() +
+  geom_vline(data = line_data, aes(xintercept = xintercept, color = color, linetype = linetype), linewidth = 1) +
+  scale_color_manual(values = c("black", "red", "purple", "orange")) +
+  scale_linetype_manual(values = c("dashed", "solid")) +
   theme(
     plot.background = element_rect(fill = "white", color = NA),
     panel.background = element_rect(fill = "white", color = NA),
-    plot.caption = element_text(hjust = 0)  # Left-align the caption
-  )+
-  geom_vline(xintercept = -5.64, color="black")
+    plot.caption = element_text(hjust = 0),  # Left-align the caption
+    legend.position = "none"
+  )
 
-ggsave("~/Documents/ECHO/exposure_viz.tiff",
-       width=8, height= 4, dpi=300)
+ggsave("~/Documents/ECHO/exposure_viz_aug_06.tiff",
+       width=10, height= 10, dpi=300)
 ```
 
 # Calculate the standard deviation of result.flg grouped by analyte
 ```{r}
 std_dev_result <- imputed_dat |>
   group_by(analyte) |>
-  summarise(std_dev_result.flg = sd(log2(result.flag), na.rm = TRUE))
+  summarise(std_dev_result.flg = 0.5*sd(log2(result.flag), na.rm = TRUE))
 
-dat_imp_bbep %>%
-  filter(log2(result.flag) > -5.64 & log2(result.flag) < -3.86) %>%
+imputed_dat %>%
+  filter(analyte == "bis(2-ethylhexyl) phosphate") |>
+  filter(log2(result.flag) > -5.64 & log2(result.flag) < -4.43) %>%
   count()
 
-dat_imp_bbep %>%
-  filter(log2(result.flag) < -5.64 & log2(result.flag) > -7.42) %>%
+imputed_dat %>%
+  filter(analyte == "bis(2-ethylhexyl) phosphate") |>
+  filter(log2(result.flag) < -5.64 & log2(result.flag) > -6.85) %>%
   count()
 ```
 
@@ -272,4 +326,259 @@ x <- exp_dat |>
   select(c(10,13,16,17,19))
 ```
 
+
+#summary with lef-truncated imputation - Aug 06
+```{r}
+dat<- read_csv("~/Documents/ECHO/imputed_left_trunc_aug06.csv") |>
+  mutate(lod = case_when(
+    analyte == "diethylphosphate" ~ 0.03,
+    analyte == "bis(1,3-dichloro-2-propyl) phosphate" ~ 0.02,
+    analyte == "bis(butoxyethyl) phosphate" ~ 0.02,
+    analyte == "bis(2-chloroethyl) phosphate" ~ 0.02,
+    analyte == "bis(1-chloro-2-propyl) phosphate" ~ 0.02,
+    analyte == "bis(2-methylphenyl) phosphate" ~ 0.01,
+    analyte == "bis(2-ethylhexyl) phosphate" ~ 0.02,
+    analyte == "dipropyl phosphate" ~ 0.03,
+    TRUE ~ NA_real_  # If analyte does not match any of the above, assign NA
+  ))
+```
+
+#summary table
+```{r}
+# Step 1: Calculate summary statistics
+summary_stats <- dat %>%
+  group_by(analyte) %>%
+  summarise(
+    log_lod_num = log2(first(lod)),  # Calculate log_lod as numeric
+    std_dev_result_num = sd(log2(result.res), na.rm = TRUE), # Calculate std_dev_result as numeric
+    half_std_dev_result = (sd(log2(result.res), na.rm = TRUE))/2,
+    quart_std_dev_result = (sd(log2(result.res), na.rm = TRUE))/4,
+    eigth_std_dev_result = (sd(log2(result.res), na.rm = TRUE))/8,
+    .groups = 'drop'  # Ungroup after summarising
+  ) %>%
+  mutate(
+    lod_plus_sd_num = log_lod_num + std_dev_result_num,  # Calculate lod_plus_sd as numeric
+    lod_minus_sd_num = log_lod_num - std_dev_result_num,  # Calculate lod_plus_sd as numeric
+    lod_plus_half_sd = log_lod_num + half_std_dev_result,  
+    lod_minus_half_sd = log_lod_num - half_std_dev_result, 
+    lod_plus_quart_sd = log_lod_num + quart_std_dev_result,  
+    lod_minus_quart_sd = log_lod_num - quart_std_dev_result,
+    lod_plus_eigth_sd = log_lod_num + eigth_std_dev_result,  
+    lod_minus_eigth_sd = log_lod_num - eigth_std_dev_result
+  )
+
+# Step 2: Count observations within the specified range
+count_within_range <- dat %>%
+  left_join(summary_stats, by = c("analyte")) %>%
+  group_by(analyte) %>%
+  summarise(
+    count_lod_plus_sd = sum(log2(result.res) > log2(lod) & log2(result.res) < lod_plus_sd_num, na.rm = TRUE),
+    count_lod_minus_sd = sum(log2(result.res) < log2(lod) & log2(result.res) > lod_minus_sd_num, na.rm = TRUE),
+  
+    count_lod_plus_half_sd = sum(log2(result.res) > log2(lod) & log2(result.res) < lod_plus_half_sd, na.rm = TRUE),
+    count_lod_minus_half_sd = sum(log2(result.res) < log2(lod) & log2(result.res) > lod_minus_half_sd, na.rm = TRUE),
+    
+    count_lod_plus_quart_sd = sum(log2(result.res) > log2(lod) & log2(result.res) < lod_plus_quart_sd, na.rm = TRUE),
+    count_lod_minus_quart_sd = sum(log2(result.res) < log2(lod) & log2(result.res) > lod_minus_quart_sd, na.rm = TRUE),
+    
+    count_lod_plus_eigth_sd = sum(log2(result.res) > log2(lod) & log2(result.res) < lod_plus_eigth_sd, na.rm = TRUE),
+    count_lod_minus_eigth_sd = sum(log2(result.res) < log2(lod) & log2(result.res) > lod_minus_eigth_sd, na.rm = TRUE),
+    
+    total_obs = n(),
+    obs_with_LOD_count = sum(!is.na(lod)),
+    obs_with_LOD_percentage = sprintf("%.4f%%", obs_with_LOD_count / total_obs * 100),
+    obs_bel_LOD_count = sum(!is.na(lod) & result.res <= lod, na.rm = TRUE),
+    obs_bel_LOD_percentage = sprintf("%.4f%%", obs_bel_LOD_count / total_obs * 100),
+    analyte_result_NA_count = sum(is.na(result.res)),
+    analyte_result_NA_percentage = sprintf("%.4f%%", analyte_result_NA_count / total_obs * 100),
+    min_value = ifelse(sum(!is.na(result.res)) > 0, sprintf("%.4f", min(result.res, na.rm = TRUE)), "NA"),
+    percentile_10 = sprintf("%.4f", quantile(result.res, 0.10, na.rm = TRUE)),
+    percentile_25 = sprintf("%.4f", quantile(result.res, 0.25, na.rm = TRUE)),
+    percentile_50 = sprintf("%.4f", quantile(result.res, 0.50, na.rm = TRUE)),
+    percentile_75 = sprintf("%.4f", quantile(result.res, 0.75, na.rm = TRUE)),
+    percentile_90 = sprintf("%.4f", quantile(result.res, 0.90, na.rm = TRUE)),
+    max_value = ifelse(sum(!is.na(result.res)) > 0, sprintf("%.4f", max(result.res, na.rm = TRUE)), "NA"),
+    .groups = 'drop'
+  )
+
+# Step 3: Merge results and format output
+sd_threshold <- summary_stats |>
+  left_join(count_within_range, by = c("analyte"))  |>
+  mutate(across(2:6, ~ sprintf("%.4f", .)))
+
+write_csv(sd_threshold, "~/Documents/ECHO/summary_aug_06.csv")
+```
+
+#exposure differences by demographic groups
+```{r}
+imputed_dat<- read_csv("~/Documents/ECHO/imputed_left_trunc_aug06.csv") |>
+  clean_names() |>
+  mutate(truncated_id = substr(subject_id, 1, 6))
+
+#age variable from Der file
+dem_age <- read_csv("~/Documents/ECHO/ECHO_data/demog/Der_Dem_DemChild.csv") |>
+  clean_names() |>
+  select(c(1,2,6,31))
+
+
+#ESS file
+dem_b <- read_csv("~/Documents/ECHO/ECHO_data/demog/Ess_Dem_Dem_B.csv") |>
+  select(c(4,5,6,10,12,13:28,45)) |>
+  clean_names() |>
+  mutate(
+    x_form_dt = mdy(x_form_dt), 
+    xdem_b_a1 = mdy(xdem_b_a1), 
+    duration_years = sprintf("%.1f", as.numeric(difftime(xdem_b_a1, x_form_dt, units = "days")) / 365.25)
+  ) |>
+  mutate(
+    dem_b_a5 = recode(dem_b_a5, `1` = "Yes", `2` = "No",
+                        `-6` = "Not_applicable", `-7` = "Pref_not_answ", 
+                        `-8` = "dont_know", `-9` = "missing"),
+    dem_b_a2 = recode(dem_b_a2,
+                       `1` = "No schooling/never attended",
+                       `2` = "8th grade or less",
+                       `3` = "Some high school, no degree",
+                       `4` = "High school degree",
+                       `5` = "GED or equivalent",
+                       `6` = "Some college, no degree",
+                       `7` = "Associate's degree (AA, AS)",
+                       `8` = "Bachelor's degree (BA, BS)",
+                       `9` = "Master's degree (MA, MS, MEd, MSW, MBA, MPH)",
+                       `10` = "Professorial or Doctorate Degree (PhD, EdD, MD, JD)",
+                       `-6` = "Not applicable",
+                       `-7` = "Prefer not to answer",
+                       `-8` = "Don't know",
+                       `-9` = "Missing"),
+    dem_b_a3 = recode(dem_b_a3,
+                      `1` = "Yes",
+                      `2` = "No",
+                      `-6` = "Not applicable",
+                      `-7` = "Prefer not to answer",
+                      `-8` = "Don't know",
+                      `-9` = "Missing"),
+    dem_b_a4_1 = recode(dem_b_a4_1, `0` = "non_white", `1` = "white"),
+    dem_b_a4_2 = recode(dem_b_a4_2, `0` = "non_afr_american", `1` = "afr_american"),
+    dem_b_a4_3 = recode(dem_b_a4_3, `0` = "non_ameri_indi_alask", `1` = "ameri_indi_alask"),
+    dem_b_a4_4 = recode(dem_b_a4_4, `0` = "non_asia_ameri", `1` = "asia_ameri"),
+    dem_b_a4_5 = recode(dem_b_a4_5, `0` = "non_othr_asian", `1` = "othr_asian"),
+    dem_b_a4_6 = recode(dem_b_a4_6, `0` = "non_NHOPI", `1` = "NHOPI"),
+    race = case_when(
+    # Check each column starting with 'dem_b_a4' and assign the value if it doesn't start with 'non_'
+    !is.na(dem_b_a4_1) & !str_starts(dem_b_a4_1, "non_") ~ dem_b_a4_1,
+    !is.na(dem_b_a4_2) & !str_starts(dem_b_a4_2, "non_") ~ dem_b_a4_2,
+    !is.na(dem_b_a4_3) & !str_starts(dem_b_a4_3, "non_") ~ dem_b_a4_3,
+    !is.na(dem_b_a4_4) & !str_starts(dem_b_a4_4, "non_") ~ dem_b_a4_4,
+    !is.na(dem_b_a4_5) & !str_starts(dem_b_a4_5, "non_") ~ dem_b_a4_5,
+    !is.na(dem_b_a4_6) & !str_starts(dem_b_a4_6, "non_") ~ dem_b_a4_6,
+    TRUE ~ NA_character_  # If none match, assign NA
+  )
+  ) |>
+  select(c(1,2,5,6,22,24)) |>
+  rename(educa = dem_b_a2,
+         hisp_ori = dem_b_a3,
+         foreg_brn = dem_b_a5) 
+#not considered Age (in years) at time of form completion since it has values form -1 to 21
+
+#removing duplicates
+dem_b_clean <- dem_b |>
+    mutate(truncated_id = substr(x_participant_id, 1, 6)) |>
+    rowwise() |>
+    mutate(completeness_score = sum(!is.na(c(educa, hisp_ori, foreg_brn, race)))) |>
+    ungroup() |>
+    group_by(truncated_id) |>
+    arrange(desc(completeness_score), visit_name) |>
+    slice_head(n = 1) |>
+    select(-truncated_id, -completeness_score)
+
+#join demographics and exposure data
+demog_exp<- left_join(imputed_dat, dem_b_clean,
+                      by="truncated_id")
+
+#export data - to test demographic differences - August 23, 2024
+write_csv(demog_exp, "~/Documents/ECHO/ECHO_data/derived_df/demog_exp.csv")
+
+```
+
+### For AGE VARIABLE
+```{r}
+#Der file
+dem_b <- read_csv("~/Documents/ECHO/ECHO_data/demog/Der_Dem_DemChild.csv") |>
+  clean_names() |>
+  select(c(1,2,31)) |>
+  mutate(demchild_mat_age = ifelse(demchild_mat_age == -9, NA, demchild_mat_age),
+         truncated_id = substr(x_preg_id, 1, 6)) |>
+  select(c(4,3)) |>
+  group_by(truncated_id) |> 
+  summarise(demchild_mat_age = as.numeric(sprintf("%.1f", mean(demchild_mat_age, na.rm = TRUE)))) |> 
+  ungroup()
+  
+  
+
+ggplot(dem_b, aes(x = demchild_mat_age)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 5, fill = "royalblue", color = "black", alpha = 0.5) +
+  geom_density(color = "blue", linewidth = 1) +
+  labs(title = " ", x = "Age", y = "Density") +
+  scale_x_continuous(breaks = seq(10,70, by = 10)) +
+  theme_minimal()
+
+#join this with demog_exp.csv
+df<- left_join(demog_exp, dem_b, by= "truncated_id")
+write_csv(df, "~/Documents/ECHO/ECHO_data/derived_df/demog_exp_v_sep_7_2024.csv")
+```
+
+#testing for group differences - Sep 7, 2024
+#formatting steps
+```{r}
+demog_exp<- read_csv("~/Documents/ECHO/ECHO_data/derived_df/demog_exp_v_sep_7_2024.csv") |>
+  mutate(
+    race = recode(race, "white" = "white", .default = "non_white") |> 
+      fct_na_value_to_level("non_white"),
+    hisp_ori = recode(hisp_ori, "Yes" = "yes", .default = "no") |> 
+      fct_na_value_to_level("no"),
+    foreg_brn = recode(foreg_brn, "Yes" = "yes", .default = "no") |> 
+      fct_na_value_to_level("no")
+  ) |>
+  mutate(
+    educa = case_when(
+      educa %in% c(
+        "Bachelor's degree (BA, BS)", 
+        "Master's degree (MA, MS, MEd, MSW, MBA, MPH)",
+        "Professorial or Doctorate Degree (PhD, EdD, MD, JD)",
+        "High school degree","Associate's degree (AA, AS)",
+        "Some high school, no degree")
+      ~ "high_school_or_abv",
+      educa %in% c("8th grade or less", 
+        "Don't know","GED or equivalent", 
+        "Prefer not to answer",
+        "Some college, no degree") ~ "less_than_high_school", TRUE 
+      ~ "less_than_high_school"))
+```
+
+#filter by analyte and the LOD based thresholds
+```{r}
+#filter data by thresholds
+bcpp_filtered <- filter_analyte(data=demog_exp, 
+                                analyte = "bis(2-ethylhexyl) phosphate",
+                                lod_minus = -6.481038227, 
+                                lod_plus = -4.806674153, 
+                                lod_value = -5.6439,
+                                label_type = "quart_sd")
+```
+
+
+```{r}
+# Call the function with your dataframe and variables
+df_summ <- bcpp_filtered |> filter(analyte == "bis(2-ethylhexyl) phosphate")
+generate_tables(df=df_summ, 
+                variables= c("race", "hisp_ori", 
+                             "educa", "foreg_brn",
+                             "demchild_mat_age"), 
+                category="category")
+```
+
+#mean difference of other exposures
+```{r}
+bcpp_filtered$result_res<-  log2(bcpp_filtered$result_res)
+analyte_summary(bcpp_filtered, analyte, category, result_res)
+```
 
