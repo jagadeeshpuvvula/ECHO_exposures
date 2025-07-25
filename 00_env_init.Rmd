@@ -5,7 +5,7 @@ output: pdf
 
 ```{r}
 library(pacman)
-pacman::p_load(tidyverse, janitor)
+pacman::p_load(tidyverse, janitor, haven, truncnorm, broom, survey)
 ```
 
 ```{r}

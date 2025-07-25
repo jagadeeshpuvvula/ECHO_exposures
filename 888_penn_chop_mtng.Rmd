@@ -1,0 +1,465 @@
+---
+title: "888_penn_chop_echo_meeting"
+author: "Jagadeesh Puvvula"
+date: "2025-04-24"
+output: pdf_document
+---
+
+```{r}
+#exposure counts
+exp_cnt<- read_csv("~/Documents/ECHO/grant_draft/ECHObiomarkers.csv")|>
+  filter(class_name %in% c("OPEs", "Per- and polyfluoroalkyl substances", "Phthalates")) |>
+  select(c(2:4,8,12))
+
+load("~/Documents/ECHO/grant_draft/ECHObiomarkers_for_grant_feb192025.rda")
+
+exp_df_i<- filtered_exp_df |>
+  filter(class_name %in% c("OPEs", "Per- and polyfluoroalkyl substances", "Phthalates"),
+         specimen_collection_trimester == "14_26Weeks") |>
+  group_by(analyte_abbrev) |>
+  filter(n() > 300) |>
+  ungroup() |>
+  filter(analyte_abbrev %in% c("DPhP", "BCEtP", "BCPP", "DBuP_DiBP", "BBOEP", 
+                               "PFHXS", "PFNA", "PFOS", "PFOA",
+                               "MCIOP", "MBZP", "MEHHP", "MEOHP", "MEP", "MEHP", 
+                               "MECPP", "MIBP", "MNBP", "MCPP", "MCINP"))
+
+#exp data for PENN CHOP meeting
+#save(exp_df, file="~/Documents/ECHO/penn_chop_echo/exposure_df.rda")
+
+
+```
+
+```{r}
+library(dplyr)
+library(networkD3)
+library(RColorBrewer)
+library(htmlwidgets)
+
+# Step 1: Aggregate flows
+links <- exp_df %>%
+  group_by(x_cohort_id_x, class_name) %>%
+  summarise(value = n(), .groups = 'drop') %>%
+  select(source = x_cohort_id_x, target = class_name, value)
+
+# Step 2: Calculate total flow per node
+source_flows <- links %>%
+  group_by(source) %>%
+  summarise(total = sum(value)) %>%
+  arrange(desc(total))
+
+target_flows <- links %>%
+  group_by(target) %>%
+  summarise(total = sum(value)) %>%
+  arrange(desc(total))
+
+# Step 3: Create ordered node list
+ordered_nodes <- c(source_flows$source, target_flows$target)
+
+# Step 4: Create nodes with sorted names
+nodes <- data.frame(
+  name = ordered_nodes,
+  stringsAsFactors = FALSE
+) %>%
+  mutate(id = row_number() - 1)
+
+# Step 5: Update links with correct IDs and colors
+cohort_levels <- unique(links$source)
+cohort_colors <- colorRampPalette(brewer.pal(min(9, length(cohort_levels)), "Set1"))(length(cohort_levels))
+cohort_color_map <- setNames(cohort_colors, cohort_levels)
+
+links_with_ids <- links %>%
+  left_join(nodes, by = c("source" = "name")) %>%
+  rename(source_id = id) %>%
+  left_join(nodes, by = c("target" = "name")) %>%
+  rename(target_id = id) %>%
+  mutate(color = cohort_color_map[source]) %>%
+  select(source = source_id, target = target_id, value, color)
+
+# Step 6: Draw Sankey diagram
+sankey_diagram <- sankeyNetwork(
+  Links = links_with_ids,
+  Nodes = nodes,
+  Source = "source",
+  Target = "target",
+  Value = "value",
+  NodeID = "name",
+  LinkGroup = "color",
+  sinksRight = TRUE,
+  fontSize = 13,
+  nodeWidth = 30,
+  nodePadding = 15,
+  height = 550,
+  width = 400
+)
+```
+
+#summary table by count and <LOD
+```{r}
+library(dplyr)
+
+plot_df <- exp_df |>
+  mutate(
+    lod_category = case_when(
+      is.na(analysis_result) | is.na(analysis_llod) ~ "NA",
+      analysis_result <= analysis_llod ~ "≤LOD",
+      analysis_result > analysis_llod ~ ">LOD"
+    )
+  ) |>
+  group_by(class_name, analyte_abbrev, lod_category) |>
+  summarise(n = n(), .groups = "drop")
+
+plot_df |>
+  ggplot(aes(x = reorder(analyte_abbrev, -n), y = n, fill = lod_category)) +
+  geom_col() +
+  coord_flip() +
+  facet_wrap(~ class_name, scales = "free_y") +
+  scale_fill_manual(
+    values = c(
+      "≤LOD" = "firebrick",
+      ">LOD" = "steelblue",
+      "NA" = "gray80"
+    )
+  ) +
+  labs(
+    x = "Analyte",
+    y = "Number of Observations",
+    fill = NULL,
+    title = "LOD Category per Analyte (Below, Above, or Missing)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom", strip.text = element_text(face = "bold"))
+```
+
+#load exposure and link with outcome and covariates
+```{r}
+load("~/Documents/ECHO/penn_chop_echo/exposure_df.rda")
+
+exp_imp <- exp_df |>
+  drop_na(analysis_result) |>
+  mutate(analysis_result = if_else(analysis_result <= analysis_llod,
+                                   analysis_llod / sqrt(2),
+                                   analysis_result))
+
+#distribution plot
+
+exp_df |>
+  drop_na(analysis_result) |>
+  ggplot(aes(x = analysis_result, fill = analyte_abbrev)) + 
+  geom_density(alpha = 0.6) +  # Use transparency for overlapping densities
+  facet_wrap(~ class_name, ncol = 1) +  # Create separate panels for each class_name
+  scale_fill_viridis_d() +  # Use a color palette
+  scale_x_log10() +  # Apply a log scale to the x-axis
+  labs(title = " ",
+       x = "Analysis Result (Log-10 Scale)",
+       y = "Density") +
+  theme_minimal() + 
+  theme(legend.position = "bottom", 
+        legend.title = element_blank(),
+        strip.text = element_text(size = 12)) +  # Optional: customize facet label size
+  guides(fill = guide_legend(nrow = 3, byrow = TRUE))
+```
+
+#for analysis
+```{r}
+#early childhood sleep t-score from CBCL. Parent reported
+cbcl<- read_csv("~/Documents/ECHO/ECHO_data/all_data/ECHO Cohort v2_StudyItems/Data/04_derived/Der_CNH_CBCLPre.csv")|>
+  filter(respondent %in% c(2, 3))|>
+  select(c(1:3,8,26, 27, 28)) |>
+  drop_na() |> distinct()|>
+  mutate(cbclpre_synd_sleep_cl = recode(cbclpre_synd_sleep_cl,
+                      `0` = "Normal_range",
+                      `1` = "Boderline_clinical_range",
+                      `2` = "Clinical_range"))|>
+  mutate(across(where(is.character), as.factor)) 
+
+exp_df<- exp_df_i |>
+  drop_na(analysis_result) |>
+  select(c(1,2,10,13)) |>
+  pivot_wider(
+    names_from = analyte_abbrev,
+    values_from = analysis_result,
+    values_fn = mean,
+    values_fill = NA
+  ) 
+```
+
+#re-doing covariates
+```{r}
+#Race, ethinicity
+mat_race<- read_csv("~/Documents/ECHO/ECHO_data/01_research/PtReg.csv") |>
+  select(c("xParticipantID", "Ethnicity", "Race")) |>
+  mutate(
+    Race = as.factor(recode(Race, 
+                  `1` = "White", `2` = "Black", `3` = "Asian", `4` = "NHOPI", 
+                  `5` = "AIAN", `6` = "Multi", `-6` = "NA", `-7` = "Decli",
+                  `-8` = "Unknown", `-9` = "Missing"
+                  )),
+    Ethnicity = as.factor(recode(Ethnicity, 
+                  `1` = "Not-Hisp/Latino", `2` = "Hisp/Latino", 
+                  `-6` = "NA", `-7` = "Decli",
+                  `-8` = "Unknown", `-9` = "Missing"
+                  ))
+    )
+
+#maternal education
+mat_edu<- read_csv("~/Documents/ECHO/ECHO_data/all_data/ECHO Cohort v2_StudyItems/Data/03_nihtb/registration.csv") |>
+  select(c(4, 12)) |>
+  mutate(
+    motherseducation = as.factor(case_when(
+      motherseducation == 1 ~ "None",
+      motherseducation >= 2 & motherseducation <= 16 ~ "HighSchool_or_less",
+      motherseducation >= 25 & motherseducation <= 28 ~ "HighSchool_or_less",
+      motherseducation >= 18 & motherseducation <= 22 ~ "Some_college_to_masters",
+      motherseducation >= 23 & motherseducation <= 24 ~ "professional_doctoral",
+      motherseducation == 999 ~ "Unknown",
+      TRUE ~ as.character(motherseducation)
+    ))
+  )
+
+#foregin born
+foreg_born <- read_csv("~/Documents/ECHO/ECHO_data/demog/Ess_Dem_Dem_B.csv") |>
+  select(c(4,45)) |>
+  mutate(
+    foreg_born = as.factor(recode(dem_b_a5, `1` = "Yes", `2` = "No",
+                        `-6` = "Not_applicable", `-7` = "Pref_not_answ", 
+                        `-8` = "dont_know", `-9` = "missing"))
+    ) |>
+  select(-c(dem_b_a5))
+
+#
+dem_age <- read_csv("~/Documents/ECHO/ECHO_data/demog/Der_Dem_DemChild.csv") |>
+  select(c(1,2,6,31)) |>
+  mutate(
+    child_sex = as.factor(recode(demchild_sex, `1` = "Male", `2` = "Female",
+                        `3` = "Ambiguous", `-5` = "Inconsist", 
+                        `-8` = "dont_know", `-9` = "missing"))
+    ) |>
+  select(-c(demchild_sex))
+
+# Load required packages
+library(tidyverse)
+
+# First, handle duplicate IDs in each dataframe before joining
+demog <- dem_age %>%
+  # Ensure unique entries in dem_age
+  distinct(xParticipantID, .keep_all = TRUE) %>%
+  # Join with foreign born data
+  full_join(
+    foreg_born %>% distinct(xParticipantID, .keep_all = TRUE), 
+    by = "xParticipantID"
+  ) %>%
+  # Join with mother education data
+  full_join(
+    mat_edu %>% distinct(xParticipantID, .keep_all = TRUE), 
+    by = "xParticipantID"
+  ) %>%
+  # Join with mother race data
+  full_join(
+    mat_race %>% distinct(xParticipantID, .keep_all = TRUE), 
+    by = "xParticipantID"
+  ) %>%
+  # Remove whatever column is at position 1 (assuming it's unnecessary)
+  select(-c(1)) %>%
+  # Group by participant ID
+  group_by(xParticipantID) %>%
+  # Fill missing values for specified columns within each participant group
+  fill(motherseducation, Ethnicity, Race, .direction = "downup") %>%
+  # Remove grouping
+  ungroup() %>%
+  # Remove any remaining duplicates
+  distinct()
+
+#save(demog, file = "~/Documents/ECHO/ECHO_data/demog.rda")
+load("~/Documents/ECHO/ECHO_data/demog.rda")
+```
+
+```{r}
+# Create the analysis dataframe with improved handling of many-to-many joins
+analy_df <- exp_df %>%
+  # Create the joining ID as before
+  mutate(join_id = substr(x_participant_id, 1, 9)) %>%
+  
+  # First join with CBCL data
+  full_join(
+    cbcl %>% 
+      # Create the joining ID
+      mutate(join_id = substr(xParticipantID, 1, 9)) %>%
+      # Ensure CBCL data has one row per join_id before joining
+      group_by(join_id) %>%
+      # Use first() to get the first value for each column, with na.rm=TRUE to skip NAs
+      summarize(across(everything(), ~first(na.omit(.))), .groups = "drop"),
+    by = "join_id"
+  ) %>%
+  
+  # Then join with demographic data
+  left_join(
+    demog %>%
+      # Select only the columns you need
+      select(1, 4:7) %>%
+      # Create the joining ID
+      mutate(join_id = substr(xParticipantID, 1, 9)) %>%
+      # Ensure demographic data has one row per join_id before joining
+      group_by(join_id) %>%
+      # Use first() to get the first value for each column, with na.rm=TRUE to skip NAs
+      summarize(across(everything(), ~first(na.omit(.))), .groups = "drop"),
+    by = "join_id"
+  ) %>%
+  
+  # Calculate non-missing values per row to prioritize more complete records
+  mutate(non_missing = rowSums(!is.na(across(everything())))) %>%
+  # Sort by participant ID and then by completeness
+  arrange(x_participant_id, desc(non_missing)) %>%
+  # Keep only the most complete record for each participant
+  distinct(x_participant_id, .keep_all = TRUE) %>%
+  # Remove the non_missing helper column
+  select(-non_missing) %>%
+  # Recode the sleep classification variable
+  mutate(cbclpre_synd_sleep_cl = factor(recode(cbclpre_synd_sleep_cl, 
+                                              "Normal_range" = "0", 
+                                              .default = "1")))
+```
+
+#save data version for penn chop echo meeting (n=4,076)
+```{r}
+save(analy_df, file = "~/Documents/ECHO/penn_chop_echo/analy_df.rda")
+```
+
+#viz missing pattern
+```{r}
+load("~/Documents/ECHO/penn_chop_echo/analy_df.rda")
+
+library(visdat)
+
+vis_dat(analy_df, warn_large_data = F,
+        sort_type = T)
+
+analy_df_fin<- analy_df |>
+  filter(!if_any(27:29, is.na))
+
+analy_df_fin[, c(1, 3:22)] |>
+  filter(!is.na(x_cohort_id_x)) |>
+  group_by(x_cohort_id_x) |>
+  mutate(row = row_number()) |>
+  ungroup() |>
+  mutate(across(-c(row, x_cohort_id_x), ~ as.integer(is.na(.x)))) |>
+  pivot_longer(cols = -c(row, x_cohort_id_x), names_to = "variable", values_to = "missing") |>
+  ggplot(aes(x = variable, y = row, fill = factor(missing))) +
+  geom_tile(color = "white") +
+  facet_wrap(~ x_cohort_id_x, scales = "free_y", ncol = 5) +
+  scale_fill_manual(values = c("0" = "white", "1" = "firebrick"),
+                    labels = c(" ", "Unmeasured"),
+                    name = " ") +
+  labs(x = "Exposure biomarkers", y = "Participants (n=2,182)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom")
+```
+
+#correlation matrix
+```{r}
+cor_df<- analy_df_fin |>
+  select(c("MEHP", "MEOHP", "MEHHP", "MECPP", 
+           "MEP", "MBZP", "MNBP", "MIBP", "MCPP", "MCINP", "MCIOP",
+           "DPhP", "BCPP", "BBOEP", "DBuP_DiBP",
+           "PFHXS", "PFNA", "PFOS", "PFOA"))
+
+library(reshape2)
+
+# Compute Spearman correlation matrix with pairwise complete observations
+cor_matrix <- cor(cor_df, method = "spearman", use = "pairwise.complete.obs")
+
+# Convert matrix to long format for ggplot2
+cor_long <- cor_matrix |>
+  melt(varnames = c("Var1", "Var2"), value.name = "correlation")
+
+# Line positions after variables 4, 11, 16, 20
+vlines <- c(4.5, 11.5, 15.5, 20.5)
+hlines <- c(4.5, 11.5, 15.5, 20.5)
+
+# Plot heatmap
+ggplot(cor_long, aes(x = Var1, y = Var2, fill = correlation)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", correlation)), size = 3) +
+  scale_fill_gradient2(
+    low = "#DC143C",     # Crimson red
+    mid = "white",       
+    high = "#0047AB",    # Cobalt blue
+    midpoint = 0,
+    limits = c(-1, 1),
+    name = "Spearman\nCorrelation"
+  ) +
+  geom_vline(xintercept = vlines, color = "black", linewidth = 0.4) +
+  geom_hline(yintercept = hlines, color = "black", linewidth = 0.4)+
+  coord_fixed() +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid = element_blank(),
+    legend.position = "bottom",
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank()
+  ) 
+```
+
+
+#qgcomp
+```{r}
+load("~/Documents/ECHO/penn_chop_echo/analy_df.rda")
+
+analy_df_fin<- analy_df |> filter(!if_any(27:29, is.na)) |>
+  select(-c("xParticipantID.y", "VisitName"))
+
+#all
+all_df<- analy_df_fin |>
+  select(c(3:22, 26:29, 33)) |>
+  drop_na()
+
+# Phthalates: variables 3–13 + 25–29, 55
+Phthalates_df <- analy_df_fin |>
+  select(c(3:13, 25:29, 33)) |>
+  drop_na() |>
+  
+
+# OPEs: variables 16–20 + 25–29, 55
+OPEs_df <- analy_df_fin |>
+  select(c(16:20, 25:29, 33)) |>
+  drop_na()
+
+# PFAS: variables 14,15,21,22 + 25–29, 55
+PFAS_df <- analy_df_fin |>
+  select(c(14, 15, 21, 22, 25:29, 33)) |>
+  drop_na()
+```
+
+#qgcomp model
+```{r}
+library(qgcomp)
+
+chem_mix<- names(all_df[1:20])
+
+qgc_nb<- qgcomp.noboot(cbclpre_synd_sleep_p ~ 
+                         Race + 
+                         MEOHP + MCPP + MEHP + MBZP + MEP + MIBP + MNBP + MCINP +
+                         MCIOP + MECPP + MEHHP +
+                         PFHXS + PFNA + PFOS + PFOA +
+                         DBuP_DiBP + DPhP + BCPP + BCEtP + BBOEP,
+                       dat= all_df, 
+                       expnms = chem_mix,
+                       family=gaussian() )
+```
+
+#qgcomp model - Phthalates
+```{r}
+library(qgcomp)
+
+chem_mix<- names(PFAS_df[1:4])
+
+qgc_nb<- qgcomp.noboot(cbclpre_synd_sleep_p ~ 
+                         Race + 
+                         PFHXS + PFNA + PFOS + PFOA ,
+                       dat= PFAS_df, 
+                       expnms = chem_mix,
+                       family=gaussian() )
+```
+

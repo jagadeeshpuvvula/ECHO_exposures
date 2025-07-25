@@ -1,0 +1,69 @@
+---
+title: "11_filter_phthalates_gestation"
+author: "Puvvula"
+date: "2024-10-31"
+output: pdf_document
+---
+
+#exposure-linkage
+```{r}
+pt_id<- read_csv(paste0(dat_path, "01_research/PtReg.csv")) |> 
+  select(c(1,8,9,11:15,17)) |> distinct()|>  clean_names()
+
+#gestational exposures
+exp_linkage<- read_csv(paste0(dat_path, "05_assays/Lab_Bio_Specimens.csv")) |>
+  select(c(2,4,6,8,13,14)) |> 
+  distinct()|> 
+  clean_names() |>
+  filter(specimen_collection_life_stage == "2") |>
+  mutate(specimen_collection_trimester = recode(specimen_collection_trimester,
+                                                `1` = "0-13weeks",
+                                                `2` = "14-26weeks",
+                                                `3` = "27weeks_delivery",
+                                                `-6` = "Not_applicable",
+                                                `-7` = "Declined",
+                                                `-8` = "Dont_know",
+                                                `-9` = "Missing"))
+```
+
+#exposure data
+```{r}
+exp_dat<- read_csv(paste0(dat_path, "05_assays/Lab_Bio_Analysis_Results.csv")) |>
+  select(-c(1:3,6,8:12,14,15,18,20:26)) |>
+  mutate(analysis_analyte_name = str_to_lower(analysis_analyte_name),
+         #log_lod = log2(analysis_llod + 1e-6)
+         )|>
+  mutate(analysis_analyte_name = fct_recode(analysis_analyte_name,
+                                            "bis(butoxyethyl) phosphate" = "bis(butoxyethyl) pohosphate",
+                                            "bis(2-ethylhexyl) phosphate" = "bis(2-ethylhexyl) phoshate",
+                                            "bis(1,3-dichloro-2-propyl) phosphate" = "bis(1,3-dichloro-2propyl) phosphate",
+                                            "bis(1-chloro-2-propyl) phosphate" = "bis-(1-chloro-2propl) phosphate",
+                                            "bis(2-chloroethyl) phosphate" = "bis-2chloroethyl phosphate")) |>
+  clean_names()
+```
+
+
+#filter pregnancy related exposures
+```{r}
+exp_preg<-exp_dat |>
+  filter(x_specimen_id %in% exp_linkage$x_specimen_id)
+```
+
+```{r}
+summary_df <- exp_preg |>
+  group_by(analysis_analyte_name) |>
+  summarize(
+    observation_count = n()
+  ) 
+
+ggplot(summary_df, aes(x = reorder(analysis_analyte_name, observation_count), y = observation_count)) +
+    geom_segment(aes(xend = analysis_analyte_name, yend = 0), color = "blue") + 
+    geom_point(size = 4, color = "red") +
+    labs(title = "Observation Count by Analyte Name",
+         x = "Analyte Name",
+         y = "Observation Count") +
+    coord_flip() +  # Flip coordinates for better visibility
+    theme_minimal() +
+  facet_wrap(category ~ ., scales = "free_y", ncol = 5)
+```
+

@@ -1,0 +1,260 @@
+---
+title: "09_using_home"
+author: "Jagadeesh Puvvula"
+date: "2025-07-17"
+output: pdf_document
+---
+
+```{r}
+lod<- 0.1
+ll<- lod-lod/2
+ul<- lod+lod/2
+
+ope <- haven::read_sas("~/Documents/data/fr.sas7bdat") |>
+  clean_names() |>
+  filter(visit == "16W",
+         analyte_code == "DBuP") |>
+  select(c(1,9,11))
+  
+ope_imp <- read_csv("~/Documents/data/imputed/dbup_16w.csv") |>
+  clean_names() |>
+  left_join(ope, by = "subject_id") |>
+  mutate(med_sg = median(specific_gravity)) |>
+  filter(result_res > ll & result_res < ul) |>
+  mutate(res_sg = result_res * ((med_sg -1)/(specific_gravity-1)),
+         distance = abs(result_res - lod),
+         distance = ifelse(distance == 0, 1e-9, distance),  # Avoid division by zero
+         idw_weight = 1 / (distance)^2,
+         prp_idw_weight = idw_weight/2e+18,
+         scale_idw_weight = abs(scale(idw_weight)),
+         distance_new = 1/ (distance/max(distance))^2,
+         
+         random_weight = rnorm(n()),
+         random_pos_weight = abs(rnorm(n()))
+         ) |>
+  clean_names()
+
+#divide the individual weight by total weight
+```
+
+#distribution figure
+```{r}
+ope_fig <- read_csv("~/Documents/data/imputed/dbup_16w.csv") |>
+  clean_names() |>
+  left_join(ope, by = "subject_id") |>
+  mutate(
+    med_sg = median(specific_gravity),
+    band = if_else(result_res > ll & result_res < ul, "LOD band", "none")
+    ) 
+
+ggplot(ope_fig, aes(x = log(result_res))) +
+  geom_density(fill = "lightblue", alpha = 0.2, color = "black") +
+  geom_jitter(aes(y = -1, color = band), height = 1, alpha = 0.7) +
+  geom_vline(xintercept = -2.995732, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = -1.89712, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = -2.302585, linetype = "dotted", color = "blue") +
+  labs(
+    x = "Result-log scale",
+    y = "Density",
+    color = "Band"
+  ) +
+  scale_y_continuous(
+    limits = c(-1, 0.6),              # show full range including y = -1
+    breaks = seq(0, 1, by = 0.2)    # only show labels from 0 to 1
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_text(size = 12, color = "black")
+  )
+
+```
+
+
+
+#birth outcomes
+```{r}
+out_df <- read_csv("~/Documents/data/covar_outco/covar_wide.csv") |>
+  clean_names() |>
+  select(c(1:17,50:65)) |>
+  mutate(sga = case_when(
+      is.na(gest_age) | is.na(sex) | is.na(b_wght) ~ NA_character_,
+      !sex %in% c("Female", "Male") ~ NA_character_,
+      gest_age < 24 | gest_age > 42 ~ NA_character_,
+      sex == "Female" & floor(gest_age) == 24 & b_wght <= 545 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 25 & b_wght <= 567 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 26 & b_wght <= 622 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 27 & b_wght <= 702 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 28 & b_wght <= 800 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 29 & b_wght <= 911 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 30 & b_wght <= 1033 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 31 & b_wght <= 1173 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 32 & b_wght <= 1335 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 33 & b_wght <= 1526 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 34 & b_wght <= 1747 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 35 & b_wght <= 1987 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 36 & b_wght <= 2230 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 37 & b_wght <= 2461 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 38 & b_wght <= 2664 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 39 & b_wght <= 2829 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 40 & b_wght <= 2950 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 41 & b_wght <= 3020 ~ "SGA",
+      sex == "Female" & floor(gest_age) == 42 & b_wght <= 3033 ~ "SGA",
+      
+      sex == "Male" & floor(gest_age) == 24 & b_wght <= 580 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 25 & b_wght <= 595 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 26 & b_wght <= 652 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 27 & b_wght <= 741 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 28 & b_wght <= 851 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 29 & b_wght <= 972 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 30 & b_wght <= 1102 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 31 & b_wght <= 1247 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 32 & b_wght <= 1414 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 33 & b_wght <= 1608 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 34 & b_wght <= 1834 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 35 & b_wght <= 2078 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 36 & b_wght <= 2325 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 37 & b_wght <= 2560 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 38 & b_wght <= 2766 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 39 & b_wght <= 2935 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 40 & b_wght <= 3062 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 41 & b_wght <= 3143 ~ "SGA",
+      sex == "Male" & floor(gest_age) == 42 & b_wght <= 3175 ~ "SGA",
+      TRUE ~ "not_SGA"
+    )
+    )
+```
+
+#viz
+```{r}
+set.seed(2025)  # For reproducible jitter
+
+# Add a jittered y position to each observation
+ope_imp$y_jitter <- jitter(rep(1, nrow(ope_imp)), amount = 0.3)
+
+ggplot(ope_imp, aes(y = y_jitter)) +
+  geom_segment(
+    aes(
+      x = result_res,
+      xend = lod,
+      yend = y_jitter
+    ),
+    alpha = 0.7
+  ) +
+  geom_point(
+    mapping = aes(x = result_res, size = idw_weight),
+    alpha = 0.9
+  ) +
+  geom_vline(
+    xintercept = unique(lod),
+    linetype = "solid", color = "royalblue", linewidth = 2, alpha = 0.4
+  ) +
+  scale_x_continuous(
+    name = "dbup") +
+  scale_y_continuous(NULL, breaks = NULL) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none",
+    legend.direction = "horizontal"
+  )+
+  labs(
+  caption = "dbup - LOD±LOD/2\n Below LOD = 42 & Above LOD = 50"
+)
+```
+
+# associations/differences
+```{r}
+analy_df <- ope_imp |>
+  left_join(out_df, by = "subject_id") |>
+  mutate(
+    race = if_else(race == "White or Caucasian", "white", "nonwhite"),
+    hh_income = if_else(hh_income %in% c(
+      "Between $5,000 and $10,000", "Between $10,000 and $15,000", "Between $15,000 and $20,000",
+      "Between $20,000 and $25,000", "Between $25,000 and $30,000", "Between $30,000 and $40,000",
+      "Between $40,000 and $50,000"), 
+      "lt_50k", "gt_50k"),
+    mom_edu = if_else(mom_edu %in% c("8th grade or less", "Some high School (Grades 9, 10, 11, 12)",
+                                     "High school diploma (completed grade 12)", "GED"),
+                      "high_scl", "degree"),
+    parity_cat = if_else(parity_cat == "0", "Nullip", "Multipar"),
+    gest_diabetes = if_else(gest_diabetes == "0", "No", "Yes"),
+    gest_hypertension = if_else(gest_hypertension == "0", "No", "Yes"),
+    preeclampsia = if_else(preeclampsia == "0", "No", "Yes"),
+    gest_cardio_comp = if_else(gest_cardio_comp == "0", "No", "Yes"),
+    flg_lod = if_else(flg_lod == "0", "abv_lod", "bel_lod"),
+    mari_st = if_else(mari_st == "Married, living together", "Married, living together",
+                      "other")
+  ) |>
+  mutate(across(where(is.character), as.factor)) |>
+  mutate(across(
+    13:43 & where(is.numeric),
+    ~ ifelse(is.na(.), median(., na.rm = TRUE), .)
+  )) |>
+  mutate(across(
+    13:43 & where(is.factor),
+    ~ {
+      mode_val <- names(sort(table(.), decreasing = TRUE))[1]
+      fct_na_value_to_level(., level = mode_val)
+    }
+  ))
+```
+
+#regression - continous outcome
+```{r}
+model <- glm(
+  gest_age ~ flg_lod,
+  #gest_age ~ log2(result_res),
+  #weights = distance_new,
+  data = analy_df
+)
+
+#categorical outcome
+model <- glm(
+  gest_hypertension ~ flg_lod,
+  #gest_diabetes ~ log2(result_res),
+  #weights = prp_idw_weight,
+  data = analy_df,
+  family = binomial
+)
+```
+
+
+tidy(model, conf.int = TRUE, exp = F) |>
+  mutate(across(c(estimate, conf.low, conf.high), ~round(.x, 2)))
+
+
+#regression - categorical outcome - skip this
+```{r}
+library(survey)
+# Define survey design with weights
+design <- svydesign(ids = ~1, weights = ~idw_weight, data = reg_df)
+
+# Fit logistic regression with weights
+model_svy <- svyglm(cond_ghtn ~ log2(result_res), design = design, family = quasibinomial())
+
+tidy(model_svy, conf.int = TRUE, exponentiate = F) |>
+  mutate(across(c(estimate, conf.low, conf.high), ~ round(.x, 2)))
+```
+
+#group differences
+#survery chi-sq test
+```{r}
+# Assume your data frame is reg_df
+design <- svydesign(ids = ~1, weights = ~idw_weight, data = analy_df)
+
+# Cross-tabulation with weights
+svytable(~ foreg_brn + flg_lod, design)
+
+# Rao-Scott chi-square test (adjusts for weights)
+svychisq(~ foreg_brn + flg_lod, design)
+
+#regular chisq
+chisq.test(table(analy_df$fish_consumption, analy_df$flg_lod))
+
+#t-test
+svyttest(demchild_mat_age ~ flg_lod, design)
+t.test(mom_age_deliv ~ flg_lod, data = analy_df)
+```
+

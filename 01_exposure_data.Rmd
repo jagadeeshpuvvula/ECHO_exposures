@@ -551,34 +551,159 @@ demog_exp<- read_csv("~/Documents/ECHO/ECHO_data/derived_df/demog_exp_v_sep_7_20
         "Don't know","GED or equivalent", 
         "Prefer not to answer",
         "Some college, no degree") ~ "less_than_high_school", TRUE 
-      ~ "less_than_high_school"))
+      ~ "less_than_high_school")) |>
+  mutate(truncated_id = substr(subject_id, 1, 9))
+
+
+#join outcome here
+demog_exp_out<- left_join(demog_exp, dt_out, by="truncated_id") 
+
+#join mom outcomes
+final_df<- left_join(demog_exp_out, mom_dat_imp, by="truncated_id")
 ```
 
-#filter by analyte and the LOD based thresholds
+
+#data version saved on Nov 07
 ```{r}
-#filter data by thresholds
-bcpp_filtered <- filter_analyte(data=demog_exp, 
-                                analyte = "bis(2-ethylhexyl) phosphate",
-                                lod_minus = -6.481038227, 
-                                lod_plus = -4.806674153, 
-                                lod_value = -5.6439,
-                                label_type = "quart_sd")
+write_csv(final_df, "~/Documents/ECHO/ECHO_data/derived_df/demog_exp_out_nov_22.csv")
+demog_exp_out<- read_csv("~/Documents/ECHO/ECHO_data/derived_df/demog_exp_out_nov_22.csv")
 ```
+
+#filter strategy update September 20
+```{r}
+#bis(1,3-dichloro-2-propyl) phosphate; LOD 0.02; 13% below LOD
+#bis(2-chloroethyl) phosphate; LOD 0.02; 32% below LOD
+#bis(1-chloro-2-propyl) phosphate; LOD 0.02; 43% below LOD
+#bis(2-ethylhexyl) phosphate; LOD 0.02; 73% below LOD
+#bis(butoxyethyl) phosphate; LOD 0.02; 33.2% below LOD
+#bis(2-methylphenyl) phosphate; LOD 0.01; 63.7% below LOD
+
+#diethylphosphate; LOD 0.03; 33.2% below LOD ##
+#dipropyl_phosphate; LOD 0.03; 33.2% below LOD ##
+
+chem<- "dipropyl phosphate"
+lod_value<- 0.03
+
+bcpp_filtered<- demog_exp_out |>
+  filter(analyte %in% c(chem)) |>
+  filter(result_res >= lod_value-lod_value/3 & 
+           result_res <= lod_value+lod_value/3) |> #divide by here
+  mutate(category = case_when(
+    result_res < lod_value ~ "below_lod",
+    result_res >= lod_value ~ "above_lod"
+  ),
+  demchild_mat_age = if_else(is.na(demchild_mat_age), median(demchild_mat_age, na.rm = TRUE), demchild_mat_age),
+    birth_ga = if_else(is.na(birth_ga), median(birth_ga, na.rm = TRUE), birth_ga),
+    birth_bw = if_else(is.na(birth_bw), median(birth_bw, na.rm = TRUE), birth_bw),
+  birth_bw_c = if_else(is.na(birth_bw_c), "normal", birth_bw_c),
+    birth_ga_c = if_else(is.na(birth_ga_c), "not_PTB", birth_ga_c),
+    sga = if_else(is.na(sga), "not_SGA", sga))
+```
+
+#sd based filtering
+```{r}
+
+bcpp_filtered<- demog_exp_out |>
+  filter(analyte %in% c(chem)) |>
+  filter(result_res >= 2^(-5.717800746) & #minus_half_sd_value
+           result_res <= 2^(-4.399986632)) |> #plus_half_sd_value
+  mutate(category = case_when(
+    result_res < lod_value ~ "below_lod",
+    result_res >= lod_value ~ "above_lod"
+  ),
+  demchild_mat_age = if_else(is.na(demchild_mat_age), median(demchild_mat_age, na.rm = TRUE), demchild_mat_age),
+    birth_ga = if_else(is.na(birth_ga), median(birth_ga, na.rm = TRUE), birth_ga),
+    birth_bw = if_else(is.na(birth_bw), median(birth_bw, na.rm = TRUE), birth_bw),
+  birth_bw_c = if_else(is.na(birth_bw_c), "normal", birth_bw_c),
+    birth_ga_c = if_else(is.na(birth_ga_c), "not_PTB", birth_ga_c),
+    sga = if_else(is.na(sga), "not_SGA", sga))
+```
+
 
 
 ```{r}
 # Call the function with your dataframe and variables
-df_summ <- bcpp_filtered |> filter(analyte == "bis(2-ethylhexyl) phosphate")
-generate_tables(df=df_summ, 
-                variables= c("race", "hisp_ori", 
-                             "educa", "foreg_brn",
-                             "demchild_mat_age"), 
-                category="category")
+results_df <- generate_tables(df=bcpp_filtered, 
+                              variables= c("race", "hisp_ori", 
+                                           "educa", "foreg_brn",
+                                           "birth_bw_c", "birth_ga_c", "sga",
+                                           "demchild_mat_age",
+                                           "birth_bw", "birth_ga",
+                                           "cond_gdm", "cond_ghtn", "cond_pre"), 
+                              category="category")
+
+for (var in names(results_df)) {
+  cat(paste(results_df[[var]], collapse = "\n"))
+  cat("\n")
+}
 ```
 
 #mean difference of other exposures
 ```{r}
-bcpp_filtered$result_res<-  log2(bcpp_filtered$result_res)
-analyte_summary(bcpp_filtered, analyte, category, result_res)
+mean_diff_df <- demog_exp_out |> 
+  semi_join(bcpp_filtered, by = "subject_id") |>
+  group_by(subject_id) |> 
+  mutate(category = if_else(any(analyte == chem & result_res < lod_value), 
+                            "below_lod", 
+                            "above_lod")) |> 
+  ungroup() |>
+  mutate(result_res = log2(result_res))
+
+results<- analyte_summary(mean_diff_df, analyte, category, result_res)
+
+for (analyte in names(results)) {
+  cat(paste(results[[analyte]], collapse = "\n"))
+  cat("\n")
+}
 ```
 
+#correlation heatmap
+```{r}
+demog_exp<- read_csv("~/Documents/ECHO/ECHO_data/derived_df/demog_exp_v_sep_7_2024.csv") |>
+  select(c(1,3,4)) |>
+  mutate(result_res=as.numeric(log2(result_res)))
+
+# Reshape data from long to wide format
+wide_data <- demog_exp %>%
+  group_by(subject_id, analyte) %>%
+  summarise(result_res = mean(result_res, na.rm = TRUE), .groups = 'drop') |>
+  pivot_wider(names_from = analyte, values_from = result_res) |>
+  select(-c(1)) |>
+  mutate(across(everything(), as.numeric))
+
+cormat <- round(x=cor(wide_data, method = "spearman", use = "complete.obs"), digits = 2) |>
+  melt() |>
+  clean_names()
+```
+
+```{r}
+ggplot(cormat, aes(x = var2, y = var1, fill = value, label = value)) + #, 
+    geom_tile(color = "white") +
+    geom_text(color = "black", size = 5, vjust = 1) +
+    scale_fill_gradient2(low = "red", high = "royalblue", mid = "white",
+                         midpoint = 0,
+                         limit = c(-1, 1), space = "Lab",
+                         name = "Spearman Correlation coefficient") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 11, hjust = 1),
+          axis.text.y = element_text(angle = 0, vjust = 0.5, size = 11, hjust = 1),
+          axis.title.x = element_blank(),
+          axis.title.y = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_blank(),
+          axis.ticks = element_blank(),
+          legend.position = "bottom", legend.box = "horizontal") +
+    coord_fixed()
+```
+======================================================
+race
+------------------------------------------------------
+                 above_lod            below_lod
+------------------------------------------------------
+non_white  |   1 (2.0%, 33.3%)  |   48 (98.0%, 49.0%)
+white      |   2 (3.8%, 66.7%)  |   50 (96.2%, 51.0%)
+------------------------------------------------------
+race: chi_square statistic: 2.014177e-31 (p-value: 1)
+race: fisher p_value: 1
+========================================================

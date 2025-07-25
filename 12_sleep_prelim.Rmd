@@ -1,0 +1,198 @@
+---
+title: "12_sleep_prelim"
+author: "Jagadeesh Puvvula"
+date: "2025-02-19"
+output: pdf_document
+---
+
+```{r}
+load("~/Documents/ECHO/grant_draft/ECHObiomarkers_for_grant_feb192025.rda")
+
+ope_df<- filtered_exp_df |>
+  filter(analyte_abbrev %in% c("BDCPP", "DPhP", "Sg"),
+         specimen_collection_trimester == "14_26Weeks",
+         specimen_combined == "urine") |>
+  mutate(across(where(is.character), as.factor),
+         flg_lod = if_else(analysis_result < analysis_llod, 1, 0))  |>
+  mutate(analysis_result = if_else(analysis_result < analysis_llod, 
+                                   analysis_llod / sqrt(2), 
+                                   analysis_result),
+         analysis_result = as.numeric(sprintf("%.3f", analysis_result)))|>
+  select(c(1:4,10,13,15,16)) |>
+  drop_na() |>
+  filter(analyte_abbrev %in% c("BDCPP", "DPhP", "Sg"))|>
+  filter(analysis_llod< 0.03,
+         analysis_result<100) |>
+  rename(
+    result = analysis_result,
+    analyte_code = analyte_abbrev,
+    participant_id = x_participant_id
+  ) |>
+  mutate(visit = "2trim") |>
+  group_by(across(c(1:5, 7, 8,9))) %>%
+  summarise(result = mean(result, na.rm = TRUE), .groups = "drop") %>%
+  distinct(across(c(1:5, 7, 8,9)), result, .keep_all = TRUE)
+
+
+
+|>
+  filter(analysis_result<100) |>
+  pivot_wider(names_from = analyte_abbrev,
+              values_from = analysis_result) |>
+  drop_na() 
+
+summary(ope_df)
+```
+
+#Left-truncated single imputation
+```{r}
+#impute with LOD/sqrt-2
+ope_exp_raw <- ope_df |> 
+  mutate(result = ifelse(flg_lod == 1, 0.1/sqrt(2), result),
+         log2_result = log2(result))
+
+#generate distribution summary
+LODmeansd.all <- ope_exp_raw |> 
+  group_by(analyte_code, visit) |> 
+  summarise(meanlog2 = mean(log2_result, na.rm= TRUE), sdlog2 = sd(log2_result, na.rm=TRUE)) |> 
+  mutate(test.name = (paste0(analyte_code, ".t", visit)))
+
+# Create all combinations of analyte_code and visit
+combinations <- expand.grid(
+  analyte_code = unique(ope_exp_raw$analyte_code),
+  visit = unique(ope_exp_raw$visit)
+)
+
+#perform imputation
+results <- combinations |>
+  pmap_dfr(~ process_combination(.x, .y)) |>
+  rename(imputed_res = analyte_result) |>
+  select(c(1:4))
+```
+
+#join imputed data to original dataframe
+```{r}
+ope_df_imputed <- left_join(ope_df, results, by = c("participant_id", "analyte_code", "visit")) |>
+  distinct(participant_id, analyte_code, .keep_all = TRUE) |>
+  select(-c(result))
+
+write_csv(ope_df_imputed, "~/Documents/ECHO/sleep_prelim/ope_clean.csv")
+```
+
+#outcome and covariates (CBCL [1.5 - 5 yr] =1699; PSD4a [2-8 yrs] =1229 from paper)
+```{r}
+ope_df<- read_csv("~/Documents/ECHO/sleep_prelim/ope_clean.csv")
+
+#parent reported early childhood (6-17 years) sleep score using PROMIS Sleep disturbance 4a - Parent Proxy
+#majority of children are 15 years of age
+psd4a<- read_csv("~/Documents/ECHO/ECHO_data/all_data/ECHO Cohort v2_StudyItems/Data/02_forms/Ess_CSH_PSD4a_PP.csv")|>
+  clean_names()|>
+  mutate(across(where(is.character), as.factor)) |>
+  filter(respondent %in% c(2, 3)) |>
+  select(c(2,4,5,8, 28))  |>
+  drop_na() |> distinct() |>
+  rename(participant_id = x_participant_id)
+
+#early childhood sleep t-score from CBCL. Parent reported
+cbcl<- read_csv("~/Documents/ECHO/ECHO_data/all_data/ECHO Cohort v2_StudyItems/Data/04_derived/Der_CNH_CBCLPre.csv")|>
+  clean_names()  |>
+  filter(respondent %in% c(2, 3))|>
+  select(c(1:3,8,26, 27, 28)) |>
+  drop_na() |> distinct()|>
+  rename(participant_id = x_participant_id) |>
+  mutate(cbclpre_synd_sleep_cl = recode(cbclpre_synd_sleep_cl,
+                      `0` = "Normal_range",
+                      `1` = "Boderline_clinical_range",
+                      `2` = "Clinical_range"))|>
+  mutate(across(where(is.character), as.factor)) |>
+  group_by(participant_id = substr(participant_id, 1, 9)) |> 
+  reframe(across(where(is.numeric), \(x) mean(x, na.rm = TRUE)),
+          across(where(is.character) | where(is.factor), first),
+          .groups = "drop")
+
+#2-19 years
+scha_pr <- read_csv("~/Documents/ECHO/ECHO_data/all_data/ECHO Cohort v2_StudyItems/Data/02_forms/Ess_CSH_SHCA_PR.csv")|>
+  clean_names()  |>
+  filter(respondent %in% c(2, 3))|>
+  select(c(2,4,8,26)) |>
+  drop_na() |> distinct()
+
+#BSIQ
+bsiq <- read_csv("~/Documents/ECHO/ECHO_data/all_data/ECHO Cohort v2_StudyItems/Data/02_forms/Ess_CSH_BISQ.csv")|>
+  clean_names()  |>
+  filter(respondent %in% c(2, 3))
+```
+
+#association between 2nd trimester exposure to OPEs and parent reported sleep outcomes
+```{r}
+#urine sg values
+ur_sg <- filtered_exp_df |>
+  filter(analyte_abbrev == "Sg",
+         specimen_collection_trimester == "14_26Weeks",
+         specimen_combined == "urine") |>
+  select(c(x_participant_id, analysis_result)) |>
+  rename(ur_sg= analysis_result, participant_id = x_participant_id) |>
+  group_by(participant_id) |> 
+  reframe(across(where(is.numeric), \(x) mean(x, na.rm = TRUE)),
+          across(where(is.character) | where(is.factor), first),
+          .groups = "drop")
+
+ope_df<- read_csv("~/Documents/ECHO/sleep_prelim/ope_clean.csv") |>
+  select(c(2,5,9)) |>
+  pivot_wider(names_from = analyte_code,
+              values_from = imputed_res) |>
+  left_join(ur_sg, by = "participant_id")|>
+  filter(substr(participant_id, 1, 9) %in% substr(cbcl$participant_id, 1, 9))|>
+  mutate(ur_sg = if_else(is.na(ur_sg) | ur_sg == 1,  
+                                    median(ur_sg, na.rm = TRUE),  
+                                    ur_sg)) |>
+  mutate(BDCPP_sg = BDCPP * (1.015 - 1) / (ur_sg - 1),
+         DPhP_sg = DPhP * (1.015 - 1) / (ur_sg - 1)) 
+
+#ope summary
+ope_df  |>
+  group_by(analyte_code) |> 
+  summarise(
+    n= n(),
+    median = round(median(imputed_res, na.rm = TRUE), 2),
+    q25 = round(quantile(imputed_res, 0.25, na.rm = TRUE), 2),
+    q75 = round(quantile(imputed_res, 0.75, na.rm = TRUE), 2),
+    pct_flg_lod = round(mean(flg_lod == 1, na.rm = TRUE) * 100, 2)
+  )
+
+ope_cbcl <- ope_df |>
+  mutate(id_short = substr(participant_id, 1, 9)) |> 
+  inner_join(cbcl |> mutate(id_short = substr(participant_id, 1, 9)), by = "id_short") |> 
+  #select(-id_short) |>
+  mutate(cbclpre_synd_sleep_cl = factor(recode(cbclpre_synd_sleep_cl, 
+                                               "Normal_range" = "0", 
+                                               .default = "1"))) |>
+  inner_join(demog_exp |> mutate(id_short = substr(participant_id, 1, 9)), by = "id_short") #load this from file. 06
+
+```
+
+#linear regression
+```{r}
+# Fit the linear model
+model <- lm(cbclpre_synd_sleep_t ~ log2(BDCPP_sg)+demchild_mat_age+educa+race+hisp_ori, data = ope_cbcl)
+#model <- lm(cbclpre_synd_sleep_p ~ log2(BDCPP_sg)+demchild_mat_age+educa+race+hisp_ori, data = ope_cbcl)
+
+# Get a tidy summary of the model coefficients
+model_tidy <- tidy(model, level=0.95)
+
+# Get the confidence intervals for the coefficients
+model_confint <- confint(model)
+
+# Combine the tidy coefficients and confidence intervals
+model_tidy %>%
+  mutate(conf.low = model_confint[, 1], conf.high = model_confint[, 2])
+```
+
+#logistic regression
+```{r}
+logit_reg<- glm(cbclpre_synd_sleep_cl ~ log2(BDCPP_sg)+demchild_mat_age+educa+race+hisp_ori, 
+                data = ope_cbcl, family = "binomial")
+exp(cbind(OR = coef(logit_reg), confint(logit_reg)))
+```
+
+

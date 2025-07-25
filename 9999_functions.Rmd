@@ -16,10 +16,8 @@ generate_tables <- function(df, variables, category) {
       row_perc <- prop.table(tab, 1) * 100
       col_perc <- prop.table(tab, 2) * 100
       
-      # Initialize an empty matrix for formatted values
+      # Create formatted table
       formatted_tab <- matrix(nrow = nrow(tab), ncol = ncol(tab))
-      
-      # Populate the formatted values
       for (i in 1:nrow(tab)) {
         for (j in 1:ncol(tab)) {
           count <- tab[i, j]
@@ -29,63 +27,76 @@ generate_tables <- function(df, variables, category) {
         }
       }
       
-      # Convert matrix to data frame with proper row and column names
-      formatted_tab_df <- as.data.frame(formatted_tab)
-      rownames(formatted_tab_df) <- rownames(tab)
-      colnames(formatted_tab_df) <- colnames(tab)
+      # Determine column widths
+      col_names <- colnames(tab)
+      if (is.null(col_names)) col_names <- character(0)  # Ensure col_names is not NULL
+      col_widths <- pmax(nchar(col_names), apply(formatted_tab, 2, function(x) max(nchar(x), na.rm = TRUE)))
+      col_widths <- as.numeric(col_widths)  # Ensure col_widths is numeric
+
+      row_names <- rownames(tab)
+      if (is.null(row_names)) row_names <- character(0)  # Ensure row_names is not NULL
+      row_name_width <- max(nchar(row_names), na.rm = TRUE)
+      row_name_width <- as.numeric(row_name_width)  # Ensure row_name_width is numeric
       
-      # Perform Chi-square test
-      chi_sq_test <- chisq.test(tab)
-      chi_sq_stat <- chi_sq_test$statistic
-      chi_sq_p_value <- chi_sq_test$p.value
-      
-      # Perform Fisher's Exact Test
-      fisher_test <- fisher.test(tab)
-      fisher_p_value <- fisher_test$p.value
-      
-      # Format the Chi-square results into a single line
-      chi_sq_results <- sprintf("Chi-square statistic: %0.6f (p-value: %0.8f)", chi_sq_stat, chi_sq_p_value)
-      
-      # Format the Fisher's Exact Test results into a single line
-      fisher_results <- sprintf("Fisher's Exact Test p-value: %0.8f", fisher_p_value)
-      
-      # Return a list containing the formatted table and test results
-      list(
-        Table = formatted_tab_df,
-        Chi_square_results = chi_sq_results,
-        Fisher_results = fisher_results
+      # Create result string
+      result <- c(
+        paste(rep("=", 54), collapse = ""),
+        var,
+        paste(rep("-", 54), collapse = ""),
+        sprintf("%*s %s", row_name_width, "", paste(sprintf("%*s", col_widths, col_names), collapse = "  |  ")),
+        paste(rep("-", 54), collapse = ""),
+        sapply(1:nrow(tab), function(i) {
+          sprintf("%*s |  %s", row_name_width, row_names[i], 
+                  paste(sprintf("%*s", col_widths, formatted_tab[i,]), collapse = "  |  "))
+        }),
+        paste(rep("-", 54), collapse = ""),
+        sprintf("%s: chi_square statistic: %e (p-value: %g)", var, chisq.test(tab)$statistic, chisq.test(tab)$p.value),
+        sprintf("%s: fisher p_value: %g", var, fisher.test(tab)$p.value),
+        paste(rep("=", 54), collapse = ""),
+        ""
       )
       
     } else if (is.numeric(df[[var]])) {
       # Handle continuous variables
-      means_by_category <- aggregate(df[[var]] ~ df[[category]], FUN = mean)
-      colnames(means_by_category) <- c(category, "Mean")
+      means <- tapply(df[[var]], df[[category]], mean, na.rm = TRUE)
+      sds <- tapply(df[[var]], df[[category]], sd, na.rm = TRUE)
       
-      # Perform t-test
-      categories <- unique(df[[category]])
-      if (length(categories) == 2) {
-        group1 <- df[df[[category]] == categories[1], var]
-        group2 <- df[df[[category]] == categories[2], var]
-        t_test <- t.test(group1, group2)
-        
-        t_stat <- t_test$statistic
-        t_p_value <- t_test$p.value
-        
-        # Format the t-test results into a single line
-        t_test_results <- sprintf("t-test statistic: %0.6f (p-value: %0.8f)", t_stat, t_p_value)
-      } else {
-        t_test_results <- "t-test not applicable (more than two categories)"
-      }
-      
-      # Return a list containing the means and t-test results
-      list(
-        Means_by_Category = means_by_category,
-        T_test_results = t_test_results
+      result <- c(
+        paste(rep("=", 54), collapse = ""),
+        var,
+        paste(rep("-", 54), collapse = ""),
+        sprintf("%-10s | Mean (SD)", category),
+        paste(rep("-", 54), collapse = ""),
+        sapply(names(means), function(cat) sprintf("%-10s | %.2f (%.2f)", cat, means[cat], sds[cat])),
+        paste(rep("-", 54), collapse = "")
       )
+      
+      # Perform t-test if there are exactly two categories
+      if (length(means) == 2) {
+        t_test <- t.test(df[[var]] ~ df[[category]])
+        result <- c(result,
+                    sprintf("%s: t-statistic: %e (p-value: %g)", var, t_test$statistic, t_test$p.value),
+                    paste(rep("=", 54), collapse = ""),
+                    "")
+      } else {
+        result <- c(result,
+                    "T-test not applicable (more than two categories)",
+                    paste(rep("=", 54), collapse = ""),
+                    "")
+      }
     } else {
-      # Handle other variable types (if needed)
-      list(Message = "Variable type not supported")
+      # Handle other variable types
+      result <- c(
+        paste(rep("=", 54), collapse = ""),
+        var,
+        paste(rep("-", 54), collapse = ""),
+        "Variable type not supported",
+        paste(rep("=", 54), collapse = ""),
+        ""
+      )
     }
+    
+    return(result)
   })
   
   names(results) <- variables
@@ -96,7 +107,6 @@ generate_tables <- function(df, variables, category) {
 
 ```{r}
 analyte_summary <- function(data, analyte_col, category_col, result_col) {
-  
   # Ensure columns are properly referenced
   analyte_col <- as.character(substitute(analyte_col))
   category_col <- as.character(substitute(category_col))
@@ -116,40 +126,41 @@ analyte_summary <- function(data, analyte_col, category_col, result_col) {
     # Get unique categories
     categories <- unique(subset_data[[category_col]])
     
-    # Initialize a dataframe to store means and t-test results
-    analyte_results <- data.frame()
+    # Calculate means and standard deviations by category
+    means <- tapply(subset_data[[result_col]], subset_data[[category_col]], mean, na.rm = TRUE)
+    sds <- tapply(subset_data[[result_col]], subset_data[[category_col]], sd, na.rm = TRUE)
     
-    # Check if there are exactly two categories for t-test
-    if (length(categories) == 2) {
-      # Calculate means by category
-      means <- tapply(subset_data[[result_col]], subset_data[[category_col]], mean)
-      
-      # Perform t-test
-      t_test_result <- t.test(subset_data[[result_col]] ~ subset_data[[category_col]])
-      
-      # Format the t-test result as a string
-      t_test_summary <- sprintf("%.2f (p = %.4f)", t_test_result$statistic, t_test_result$p.value)
-      
-      # Combine results into a dataframe
-      analyte_results <- data.frame(
-        category = categories,
-        mean_result = means,
-        t_test_summary = t_test_summary
-      )
-    } else {
-      # Handle cases with more than two categories or insufficient data for t-test
-      analyte_results <- data.frame(
-        category = categories,
-        mean_result = tapply(subset_data[[result_col]], subset_data[[category_col]], mean),
-        t_test_summary = NA
-      )
+    # Create formatted output
+    output <- c(
+      paste(rep("=", 54), collapse = ""),
+      analyte_level,
+      paste(rep("-", 54), collapse = ""),
+      sprintf("%-15s | Mean (SD)", category_col),
+      paste(rep("-", 54), collapse = "")
+    )
+    
+    for (cat in names(means)) {
+      output <- c(output, sprintf("%-15s | %.2f (%.2f)", cat, means[cat], sds[cat]))
     }
     
-    # Add a column for analyte level
-    analyte_results$analyte <- analyte_level
+    output <- c(output, paste(rep("-", 54), collapse = ""))
     
-    # Append results to the list
-    results_list[[as.character(analyte_level)]] <- analyte_results
+    # Perform t-test if there are exactly two categories
+    if (length(categories) == 2) {
+      t_test_result <- t.test(subset_data[[result_col]] ~ subset_data[[category_col]])
+      output <- c(output,
+                  sprintf("%s: t-statistic: %.4f (p-value: %.4f)", 
+                          analyte_level, t_test_result$statistic, t_test_result$p.value))
+    } else {
+      output <- c(output, "T-test not applicable (not exactly two categories)")
+    }
+    
+    output <- c(output, 
+                paste(rep("=", 54), collapse = ""),
+                "")
+    
+    # Add formatted output to results list
+    results_list[[as.character(analyte_level)]] <- output
   }
   
   # Return the list of results

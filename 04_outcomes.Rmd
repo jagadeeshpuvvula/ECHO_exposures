@@ -1,0 +1,167 @@
+---
+title: "04_outcomes"
+author: "Puvvula"
+date: "2024-09-30"
+output: pdf_document
+---
+
+```{r}
+chld_out <- read_csv("~/Documents/ECHO/ECHO_data/outcome/Der_HHx_Birth.csv") |>
+  clean_names()  |>
+  select(c(2,4,8)) |>
+  mutate(truncated_id = substr(x_participant_id, 1, 9)) |>
+  select(c(4,2,3)) |>
+  group_by(truncated_id) |>
+  summarise(
+    birth_ga = mean(birth_ga, na.rm = TRUE),
+    birth_bw = mean(birth_bw, na.rm = TRUE),
+    .groups = 'drop'  # This drops the grouping structure
+  ) |>
+  mutate(birth_ga = if_else(birth_ga == -5, NA_real_, birth_ga))
+  
+chld_sex <- read_csv("~/Documents/ECHO/ECHO_data/demog/Der_Dem_DemChild.csv") |>
+  clean_names() |>
+  mutate(child_sex = recode(demchild_sex,
+                      `1` = "Male",
+                      `2` = "Female",
+                      `3` = "ambiguous",
+                      `-5` = "Inconsistant",
+                      `-8` = "Don't know",
+                      `-9` = "Missing"),
+         truncated_id = substr(x_participant_id, 1, 9)) |>
+  select(c(92,93)) |>
+  distinct(truncated_id, .keep_all = TRUE)
+
+#SGA definition: https://journals.lww.com/greenjournal/fulltext/2014/07000/a_revised_birth_weight_reference_for_the_united.5.aspx 
+
+dt_out <- left_join(chld_out, chld_sex, by = "truncated_id") |> 
+  mutate(
+    birth_ga = as.numeric(sprintf("%.2f", birth_ga)),
+    birth_bw = as.numeric(sprintf("%.2f", birth_bw)),
+    sga = case_when(
+      is.na(birth_ga) | is.na(child_sex) | is.na(birth_bw) ~ NA_character_,
+      !child_sex %in% c("Female", "Male") ~ NA_character_,
+      birth_ga < 24 | birth_ga > 42 ~ NA_character_,
+      child_sex == "Female" & floor(birth_ga) == 24 & birth_bw <= 545 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 25 & birth_bw <= 567 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 26 & birth_bw <= 622 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 27 & birth_bw <= 702 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 28 & birth_bw <= 800 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 29 & birth_bw <= 911 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 30 & birth_bw <= 1033 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 31 & birth_bw <= 1173 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 32 & birth_bw <= 1335 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 33 & birth_bw <= 1526 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 34 & birth_bw <= 1747 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 35 & birth_bw <= 1987 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 36 & birth_bw <= 2230 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 37 & birth_bw <= 2461 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 38 & birth_bw <= 2664 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 39 & birth_bw <= 2829 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 40 & birth_bw <= 2950 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 41 & birth_bw <= 3020 ~ "SGA",
+      child_sex == "Female" & floor(birth_ga) == 42 & birth_bw <= 3033 ~ "SGA",
+      
+      child_sex == "Male" & floor(birth_ga) == 24 & birth_bw <= 580 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 25 & birth_bw <= 595 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 26 & birth_bw <= 652 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 27 & birth_bw <= 741 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 28 & birth_bw <= 851 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 29 & birth_bw <= 972 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 30 & birth_bw <= 1102 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 31 & birth_bw <= 1247 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 32 & birth_bw <= 1414 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 33 & birth_bw <= 1608 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 34 & birth_bw <= 1834 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 35 & birth_bw <= 2078 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 36 & birth_bw <= 2325 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 37 & birth_bw <= 2560 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 38 & birth_bw <= 2766 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 39 & birth_bw <= 2935 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 40 & birth_bw <= 3062 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 41 & birth_bw <= 3143 ~ "SGA",
+      child_sex == "Male" & floor(birth_ga) == 42 & birth_bw <= 3175 ~ "SGA",
+      TRUE ~ "not_SGA"
+    )
+  )
+```
+
+#impute missing SGA
+```{r}
+dt_out<- read_csv("~/Documents/ECHO/ECHO_data/outcome/outcome_aimin_nov20.csv")|>
+  mutate(
+    birth_ga = ifelse(is.na(birth_ga), median(birth_ga, na.rm = TRUE), birth_ga),
+    birth_bw = ifelse(is.na(birth_bw), median(birth_bw, na.rm = TRUE), birth_bw),
+    birth_bw_c = factor(if_else(birth_bw < 2500, "low_bw", "normal")),
+    birth_ga_c = factor(if_else(birth_ga < 37, "PTB", "not_PTB")),
+    sga = case_when(
+      !is.na(sga) ~ sga,
+      is.na(sga) ~ sample(c("SGA", "not_SGA"), n(), replace = TRUE, prob = c(9, n() - 9))
+    )
+  )
+```
+
+```{r}
+write_csv(dt_out, "~/Documents/ECHO/ECHO_data/outcome/outcome_aimin_nov20.csv") 
+```
+
+
+#GDM, GHTN, Preec
+```{r}
+mom_dat<- read_csv("~/Documents/ECHO/ECHO_data/demog/Der_Prg_Cond.csv") |>
+  clean_names() |>
+  select(c(1,2,5,8)) |>
+  mutate(across(2:4, ~if_else(.x == -8, NA_real_, .x)),
+         truncated_id = substr(x_preg_id, 1, 9),
+         cond_gdm = recode(cond_gdm, `1` = "Yes", `0` = "No"),
+         cond_ghtn = recode(cond_ghtn, `1` = "Yes", `0` = "No"),
+         cond_pre = recode(cond_pre, `1` = "Yes", `0` = "No"),
+         #185 in cond_pre to Yes
+         #432 of cond_gdm to Yes
+         #520 of cond_ghtn to Yes
+         )
+set.seed(123)
+mom_dat_imp<- mom_dat |>
+  mutate(
+    cond_pre = case_when(
+      is.na(cond_pre) ~ sample(c("Yes", "No"), n(), replace = TRUE, prob = c(185/sum(is.na(cond_pre)), 1 - 185/sum(is.na(cond_pre)))),
+      TRUE ~ cond_pre
+    ),
+    cond_gdm = if_else(is.na(cond_gdm), sample(c("Yes", "No"), n(), replace = TRUE, prob = c(432/n(), 1 - 432/n())), cond_gdm),
+    cond_ghtn = if_else(is.na(cond_ghtn), sample(c("Yes", "No"), n(), replace = TRUE, prob = c(520/n(), 1 - 520/n())), cond_ghtn)
+  )
+```
+
+```{r}
+write_csv(mom_dat_imp, "~/Documents/ECHO/ECHO_data/outcome/mom_out_aimin_nov20.csv") 
+```
+
+
+#viz
+```{r}
+df_viz<- dt_out |>
+  mutate(inclusion = if_else(truncated_id %in% demog_exp_out$truncated_id, "included", "excluded"))
+```
+
+```{r}
+ggplot(df_viz, aes(x = birth_bw, color = inclusion)) +
+  geom_density(alpha = 0, size = 1.5, bw = 2) +  # Remove fill, increase line thickness
+  labs(title = "Birth weight",
+       x = "Grams",
+       y = "Density") +
+  scale_color_manual(values = c("included" = "blue", "excluded" = "red")) +  # Customize line colors
+  theme_minimal() +
+  guides(color = guide_legend(ncol = 2)) +  # Make the legend appear in a single row (2 columns)
+  theme(legend.position = "bottom", 
+        legend.box = "horizontal",  # Ensure the legend is horizontal
+        legend.title = element_blank())  # Optionally, remove the legend title
+```
+
+```{r}
+ggplot(df_viz, aes(x=birth_ga, y=birth_bw, color=sga)) + 
+  geom_point(size=0.5)+
+  geom_rug() +
+  geom_smooth(method=lm)+
+  theme_bw()
+```
+

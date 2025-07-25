@@ -1,0 +1,118 @@
+---
+title: "05_prelim_analysis"
+author: "Puvvula"
+date: "2024-09-30"
+output: pdf_document
+---
+
+```{r}
+exp_dem_wide <- read_csv("~/Documents/ECHO/ECHO_data/derived_df/demog_exp_v_sep_7_2024.csv") |>
+  group_by(truncated_id, analyte, educa, hisp_ori, foreg_brn, race, demchild_mat_age) |> 
+  summarize(
+    result_res = mean(result_res),  # Or use any other summary function
+    result_flag = first(result_flag),  # Taking the first flag
+    .groups = 'drop'
+  ) |>
+  pivot_wider(names_from = analyte, values_from = c(result_res, result_flag), names_sep = "_") |>
+  clean_names() |>
+  select(c(1:14))
+
+save(exp_dem_wide, chld_out, file = "~/Documents/ECHO/dataframes_oct25.rda")
+
+df <- left_join(exp_dem_wide, chld_out, by = "truncated_id") |>
+  group_by(truncated_id) |>
+  summarise(
+    across(where(is.numeric), ~ mean(.x, na.rm = TRUE)),
+    across(where(~ !is.numeric(.)), ~ first(.x)),
+    .groups = "drop"
+  ) |>
+  mutate(across(13:16, as.factor))
+```
+
+```{r}
+library(broom)
+
+x <- lm(birth_ga ~ log2(result_res_bis_1_3_dichloro_2_propyl_phosphate), data = df)
+
+tidy(x, conf.int = TRUE, conf.level = 0.95)
+
+
+lm_loop <- function(df, exposures, outcomes) {
+  # Initialize an empty list to store results
+  results <- list()
+  
+  # Loop over each exposure and outcome combination
+  for (exposure in exposures) {
+    for (outcome in outcomes) {
+      # Run the model
+      formula <- as.formula(paste(outcome, "~ log2(", exposure, ")"))
+      model <- lm(formula, data = df)
+      
+      # Get tidy output with confidence intervals
+      model_summary <- tidy(model, conf.int = TRUE, conf.level = 0.95)
+      
+      # Filter for the exposure variable (ignoring intercept)
+      exposure_result <- model_summary[model_summary$term == paste0("log2(", exposure, ")"), ]
+      
+      # Remove "result_res_" prefix from the exposure name
+      clean_exposure <- sub("^result_res_", "", exposure)
+      
+      # Append the result to the list with rounded values
+      results[[length(results) + 1]] <- data.frame(
+        exposure = clean_exposure,
+        outcome = outcome,
+        estimate = sprintf("%.3f", exposure_result$estimate),
+        p.value = sprintf("%.3f", exposure_result$p.value),
+        conf.low = sprintf("%.3f", exposure_result$conf.low),
+        conf.high = sprintf("%.3f", exposure_result$conf.high)
+      )
+    }
+  }
+  
+  # Combine all results into a single data frame
+  results_df <- do.call(rbind, results)
+  return(results_df)
+}
+
+
+x<- lm_loop(df = df,
+            exposures = c("result_res_bis_1_3_dichloro_2_propyl_phosphate", "result_res_bis_1_chloro_2_propyl_phosphate",
+                          "result_res_bis_2_chloroethyl_phosphate", "result_res_bis_2_ethylhexyl_phosphate", 
+                          "result_res_bis_2_methylphenyl_phosphate", "result_res_bis_butoxyethyl_phosphate",
+                          "result_res_diethylphosphate","result_res_dipropyl_phosphate"),
+            outcomes = c("birth_ga", "birth_bw"))
+
+write_csv(x, "~/Documents/ECHO/prelim_results/prelim.csv")
+```
+
+#sample size table
+```{r}
+# Sequence of x values from 0.01 to 1 with step 0.5
+x_vals <- seq(0.2, 1, by = 0.1)
+
+# Constant numerator
+numerator <- (1.96 + 0.84)^2
+
+# Calculate and print the table
+result_table <- data.frame(
+  x = x_vals,
+  result = round(numerator / (x_vals^2))
+)
+
+print(result_table)
+
+```
+
+#inverse distance weights
+```{r}
+library(phylin)
+
+load("~/Documents/ECHO/dataframes_oct25.rda")
+
+idw_test <- exp_dem_wide |> select(13) |>
+  mutate(lod = as.numeric())
+
+
+```
+
+

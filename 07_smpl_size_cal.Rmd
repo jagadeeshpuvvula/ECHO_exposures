@@ -1,0 +1,90 @@
+---
+title: "07_smpl_size_cal"
+author: "Jagadeesh Puvvula"
+date: "2025-01-04"
+output: pdf_document
+---
+#https://cran.r-project.org/web/packages/mpower/readme/README.html
+```{r}
+library(pacman)
+p_load(tidyverse, mpower, NHANES, haven, survey)
+```
+
+#Logistic regression
+#get 10 chemicals for grant proposal
+
+```{r}
+#Read ECHO data instead of NHANES
+#load("~/Documents/ECHO/grant_draft/ECHObiomarkers_for_grant.rda")
+
+data("nhanes1518")
+
+#10 phthalates for sample size calculation
+chems <- c("URXCNP", "URXCOP", "URXECP", "URXHIBP", "URXMBP", 
+           "URXMC1", "URXMCOH", "URXMEP","URXMHBP", "URXMHH")
+
+#create exposure data
+chems_mod <- mpower::MixtureModel(nhanes1518[, chems] %>% 
+                                    filter(complete.cases(.)),
+                                  method = "resampling")
+
+#binary outcome - define coefficients
+bmi_mod <- mpower::OutcomeModel(f = "0.123*URXCNP + 0.102*URXCOP + 0.048*URXECP + 0.108*URXHIBP +
+0.076*URXMBP + 0*URXMC1 + 0*URXMCOH + 0*URXMEP + -1.2*URXMHBP + 0*URXMHH", 
+                                family = "binomial")
+
+#build regression model
+logit_mod <- mpower::InferenceModel(model = "glm", family = "binomial")
+
+curve <- mpower::sim_curve(xmod=chems_mod, ymod=bmi_mod, imod=logit_mod,
+                           s = 200, n = 3000,
+                           cores = 10, 
+                           errorhandling = "remove", 
+                           snr_iter = 5000,
+                           cluster_export = c("chems_mod"))
+
+curve_df <- mpower::summary(curve, crit = "pval", thres = 0.05, how = "lesser") 
+
+mpower::plot_summary(curve, crit = "pval", thres = 0.05, how = "lesser")
+
+#attempt using bkmr
+set.seed(2025)
+bkmr_imod <- InferenceModel(model = "bkmr", iter = 50, verbose = F)
+
+bkmr_power <- sim_power(chems_mod, bmi_mod, bkmr_imod, s = 100, n = 7000,
+                        cores=13, snr_iter=4000, errorhandling = "remove")
+
+bkmr_df <- mpower::summary(bkmr_power, crit = "pip", thres = 0.05, how = "lesser") 
+
+#attempt using qgcomp
+#binary outcome - define coefficients
+bmi_mod <- mpower::OutcomeModel(f = "0.0103*URXCNP + 0.0102*URXCOP + 0.028*URXECP + 0.0108*URXHIBP +
+0.076*URXMBP + 0*URXMC1 + 0*URXMCOH + 0*URXMEP + 0.0002*URXMHBP + 0.0001*URXMHH", 
+                                family = "binomial")
+
+set.seed(2025)
+qgcomp_imod <- mpower::InferenceModel(model="qgc", family= "binomial")
+
+qg_power <- mpower::sim_power(chems_mod, bmi_mod, qgcomp_imod, s = 1000, n = 2000,
+                       cores=10, snr_iter=5000, errorhandling = "remove")
+
+
+qgc_df <- mpower::summary(qg_power, crit = "pval", thres = 0.05, how = "lesser") 
+```
+
+```{r}
+data("nhanes1518")
+chems <- c("URXCNP", "URXCOP", "URXECP", "URXHIBP", "URXMBP", "URXMC1",
+"URXMCOH", "URXMEP","URXMHBP", "URXMHH", "URXMHNC", "URXMHP", "URXMIB",
+"URXMNP", "URXMOH", "URXMZP")
+chems_mod <- mpower::MixtureModel(nhanes1518[, chems], method = "resampling")
+bmi_mod <- mpower::OutcomeModel(f = "0.2*URXCNP + 0.15*URXECP +
+0.1*URXCOP*URXECP", family = "binomial")
+logit_mod <- mpower::InferenceModel(model = "glm", family = "binomial")
+logit_out <- mpower::sim_power(xmod=chems_mod, ymod=bmi_mod, imod=logit_mod,
+s=100, n=2000, cores=2, snr_iter=2000)
+logit_df <- summary(logit_out, crit="pval", thres=0.05, how="lesser")
+plot_summary(logit_out, crit="pval", thres=0.05, how="lesser")
+```
+
+

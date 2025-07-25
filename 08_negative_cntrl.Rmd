@@ -1,0 +1,106 @@
+---
+title: "08_negative_cntrl"
+author: "Jagadeesh Puvvula"
+date: "2025-03-24"
+output: pdf_document
+---
+
+#negative control for exposure -> outcome
+#negative control for outcome -> LOD exposure thresholds
+```{r}
+library(pacman)
+pacman::p_load(tidyverse, janitor)
+
+#Pre (Prenatal), Peri (Perinatal), Infancy (Inf), Early Childhood (EC), Middle Childhood (MC), Adolescence (Ado)
+
+phos<- read.csv("~/Documents/ECHO/ECHO_data/all_data/ECHO Cohort v2_StudyItems/Data/04_derived/Der_Prg_Diet.csv") |>
+  select(c(1:5,50)) |>
+  drop_na() |>
+  mutate(
+    respondent = recode(respondent,
+                      `1` = "participant",
+                      `2` = "biological_mother",
+                      `3` = "biological_father",
+                      `4` = "other",
+                      `-6` = "not_applicable",
+                      `-7` = "declined",
+                      `-8` = "dont_know",
+                      `-9` = "Missing")
+         ) |>
+  filter(str_starts(VisitName, "X1_Pre01")) |>
+  mutate(truncated_id = substr(xParticipantID, 1, 6)) |>
+  select(truncated_id, diet_phos)
+
+#prenatal allergy data available for 375 participants
+allergy <- read_csv("~/Documents/ECHO/ECHO_data/all_data/ECHO Cohort v2_StudyItems/Data/02_forms/Ess_HHx_MH2_BF.csv") |>
+  select(c(1, 2, 4:8, 26:28)) |>
+  filter(!if_any(8:10, is.na)) |>
+  mutate(
+    respondent = recode(respondent,
+                        `1` = "participant",
+                        `2` = "biological_mother",
+                        `3` = "biological_father",
+                        `4` = "other",
+                        `-6` = "not_applicable",
+                        `-7` = "declined",
+                        `-8` = "dont_know",
+                        `-9` = "Missing"),
+    mom_food_allerg = as.factor(recode(mh2_bf_2c_fam___1, 
+                             `0` = "No",
+                             `1` = "Yes")),
+    dad_food_allerg = as.factor(recode(mh2_bf_2c_fam___2, 
+                             `0` = "No",
+                             `1` = "Yes"))
+  ) |>
+  mutate(non_null_count = rowSums(!is.na(across(-xParticipantID)))) |>
+  group_by(xParticipantID) |>
+  slice_max(non_null_count, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  select(-c(non_null_count, mh2_bf_2c_fam___1, mh2_bf_2c_fam___2, mh2_bf_2c_fam___3)) |>
+  filter(respondent == "biological_mother") |>
+  mutate(allergy = if_else(dad_food_allerg == "Yes" | mom_food_allerg == "Yes", "Yes", "No"))|>
+  mutate(truncated_id = substr(xParticipantID, 1, 6)) |>
+  select(truncated_id, allergy)
+
+#birth temperature
+b_temp <- read_csv("~/Documents/ECHO/ECHO_data/all_data/ECHO Cohort v2_StudyItems/Data/02_forms/Ess_HHx_CBMRA.csv") |>
+  select(c(xParticipantID, VisitName, cbmra_c5a)) |>
+  filter(cbmra_c5a >0 & cbmra_c5a <101)|>
+  mutate(truncated_id = substr(xParticipantID, 1, 6)) 
+
+neg_cntrl<- full_join(phos, allergy, by = "truncated_id")
+```
+
+#outcome data
+```{r}
+out_df <- read_csv("~/Documents/ECHO/ECHO_data/outcome/outcome_aimin_nov20.csv") |>
+  mutate(truncated_id = substr(truncated_id, 1, 6))
+
+
+df_neg_cntrl_test<- left_join(out_df, neg_cntrl, by = "truncated_id") |>
+  mutate(sga = relevel(as.factor(sga), ref = "not_SGA"))
+```
+
+#linear model
+```{r}
+library(broom)
+
+x<- df_neg_cntrl_test |> drop_na(c(birth_ga, birth_bw, sga, diet_phos))
+
+#associations with outcomes
+tidy(lm(birth_ga ~ diet_phos, na.action = na.exclude, data = x), conf.int = TRUE) |>
+  mutate(across(where(is.numeric), ~ formatC(.x, format = "e", digits = 2)))
+tidy(lm(birth_bw ~ diet_phos+birth_ga, na.action = na.exclude, data = x), conf.int = TRUE) |>
+  mutate(across(where(is.numeric), ~ formatC(.x, format = "e", digits = 2)))
+tidy(glm(as.factor(sga) ~ diet_phos, family = binomial(), na.action = na.exclude, 
+         data = x), exponentiate = T, conf.int = TRUE)|>
+  mutate(across(where(is.numeric), ~ formatC(.x, format = "e", digits = 2)))
+
+#see associations with exposures
+tidy(lm(birth_ga ~ as.factor(dad_food_allerg), na.action = na.exclude, data = df_neg_cntrl_test), conf.int = TRUE)
+tidy(lm(birth_bw ~ as.factor(dad_food_allerg), na.action = na.exclude, data = df_neg_cntrl_test), conf.int = TRUE)
+tidy(glm(as.factor(sga) ~ as.factor(dad_food_allerg), family = binomial(), na.action = na.exclude,
+         data = df_neg_cntrl_test), exponentiate = T, conf.int = TRUE)
+```
+
+
